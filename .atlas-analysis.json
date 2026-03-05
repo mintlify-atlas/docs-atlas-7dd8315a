@@ -1,0 +1,142 @@
+{
+  "projectType": "saas",
+  "projectName": "Jarvis",
+  "projectDescription": "A GPU-accelerated desktop environment with multiplayer AI assistants, arcade games, live chat, and voice input",
+  "theme": "aspen",
+  "primaryColor": "#8B5CF6",
+  "lightColor": "#A78BFA",
+  "darkColor": "#6D28D9",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/terminal",
+              "features/ai-assistants",
+              "features/multiplayer",
+              "features/arcade-games",
+              "features/voice-input"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/overview",
+              "configuration/themes",
+              "configuration/keybindings",
+              "configuration/tiling"
+            ]
+          },
+          {
+            "group": "Plugins",
+            "pages": [
+              "plugins/overview",
+              "plugins/bookmark-plugins",
+              "plugins/local-plugins",
+              "plugins/ipc-api"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Technical Reference",
+        "groups": [
+          {
+            "group": "Architecture",
+            "pages": [
+              "architecture/overview",
+              "architecture/crates",
+              "architecture/renderer",
+              "architecture/tiling-system"
+            ]
+          },
+          {
+            "group": "Networking",
+            "pages": [
+              "networking/presence",
+              "networking/chat",
+              "networking/relay",
+              "networking/mobile-pairing"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/webview-ipc",
+              "advanced/command-palette",
+              "advanced/gpu-pipeline",
+              "advanced/build-from-source"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Rust Crates",
+            "pages": [
+              "api/jarvis-app",
+              "api/jarvis-tiling",
+              "api/jarvis-renderer",
+              "api/jarvis-ai",
+              "api/jarvis-social",
+              "api/jarvis-config",
+              "api/jarvis-webview"
+            ]
+          },
+          {
+            "group": "CLI",
+            "pages": [
+              "api/cli-reference"
+            ]
+          },
+          {
+            "group": "IPC Protocol",
+            "pages": [
+              "api/ipc-messages",
+              "api/ipc-events"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "GPU-accelerated terminal emulator with WebGPU rendering",
+    "Up to 4 simultaneous Claude Opus AI assistants",
+    "Multiplayer chat with presence and invite codes",
+    "Embedded arcade games (Asteroids, Tetris, Minesweeper, etc.)",
+    "Push-to-talk voice input with Whisper transcription",
+    "Flexible plugin system for custom panels and tools",
+    "Tiling window manager with binary split tree",
+    "Live configuration with theme system",
+    "Mobile pairing via Expo app",
+    "End-to-end encrypted relay for social features"
+  ],
+  "publicApiSurface": [
+    "jarvis CLI - Main application binary with --execute, --directory, --config, --log-level flags",
+    "jarvis_config::load_config() - Load and validate configuration",
+    "jarvis_config::save_config() - Persist configuration changes",
+    "jarvis_tiling::TilingManager - Window management API",
+    "jarvis_renderer::RenderState - GPU rendering pipeline",
+    "jarvis_ai::ClaudeClient - Claude API client with streaming",
+    "jarvis_ai::GeminiClient - Gemini API client",
+    "jarvis_ai::WhisperClient - Voice transcription client",
+    "jarvis_social::PresenceClient - Real-time presence and chat",
+    "jarvis_webview::IpcBridge - WebView IPC protocol",
+    "IPC Messages: navigate, execute_command, send_chat_message, focus_pane, split_pane, close_pane",
+    "Config TOML schema with theme, colors, fonts, layout, effects sections"
+  ]
+}
