@@ -1,0 +1,385 @@
+---
+title: 'IPC Messages'
+description: 'JavaScript to Rust IPC message reference'
+---
+
+## Overview
+
+Jarvis WebViews can send messages to Rust via the IPC bridge. Messages are sent using `window.jarvis.ipc.send()` in JavaScript and handled by Rust event handlers.
+
+## Sending Messages
+
+### JavaScript API
+
+```javascript
+// Send a simple message
+window.jarvis.ipc.send('message_type', { key: 'value' });
+
+// Request-response pattern (async)
+const result = await window.jarvis.ipc.request('message_type', { key: 'value' });
+```
+
+### Message Format
+
+All IPC messages have this structure:
+
+```json
+{
+  "kind": "message_type",
+  "payload": { /* arbitrary JSON */ }
+}
+```
+
+## Built-in Message Types
+
+### Panel Management
+
+#### panel_focus
+
+Notify Rust that this pane should be focused.
+
+<ParamField path="kind" type="string" default="panel_focus">
+  Message type.
+</ParamField>
+
+<ParamField path="payload" type="{}">
+  Empty object.
+</ParamField>
+
+**JavaScript:**
+```javascript
+window.jarvis.ipc.send('panel_focus', {});
+```
+
+**Use case:** Automatically sent when the WebView is clicked.
+
+---
+
+### Keyboard Input
+
+#### keybind
+
+Forward a keyboard shortcut to Rust for handling.
+
+<ParamField path="kind" type="string" default="keybind">
+  Message type.
+</ParamField>
+
+<ParamField path="payload" type="object">
+  Keyboard event details.
+  
+  <Expandable title="Fields">
+    <ParamField path="key" type="string" required>
+      Key name (e.g., `"T"`, `"Escape"`, `"Enter"`).
+    </ParamField>
+    
+    <ParamField path="ctrl" type="bool" required>
+      Ctrl key pressed.
+    </ParamField>
+    
+    <ParamField path="alt" type="bool" required>
+      Alt/Option key pressed.
+    </ParamField>
+    
+    <ParamField path="shift" type="bool" required>
+      Shift key pressed.
+    </ParamField>
+    
+    <ParamField path="meta" type="bool" required>
+      Cmd (macOS) / Win (Windows) / Super (Linux) key pressed.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+**JavaScript:**
+```javascript
+window.jarvis.ipc.send('keybind', {
+    key: 'T',
+    ctrl: false,
+    alt: false,
+    shift: false,
+    meta: true  // Cmd+T
+});
+```
+
+**Use case:** Forward Cmd+T, Cmd+G, Escape, etc. to Rust so global keybinds work in WebViews.
+
+---
+
+### Clipboard
+
+#### clipboard_copy
+
+Copy text to the system clipboard.
+
+<ParamField path="kind" type="string" default="clipboard_copy">
+  Message type.
+</ParamField>
+
+<ParamField path="payload" type="object">
+  <ParamField path="text" type="string" required>
+    Text to copy.
+  </ParamField>
+</ParamField>
+
+**JavaScript:**
+```javascript
+window.jarvis.ipc.send('clipboard_copy', {
+    text: 'Hello, World!'
+});
+```
+
+**Use case:** WebView clipboard access is restricted on macOS/iOS, so we proxy through Rust.
+
+---
+
+#### clipboard_paste
+
+Request clipboard content from Rust.
+
+<ParamField path="kind" type="string" default="clipboard_paste">
+  Message type.
+</ParamField>
+
+<ParamField path="payload" type="{}">
+  Empty object (or include `_reqId` for request-response).
+</ParamField>
+
+**JavaScript:**
+```javascript
+const result = await window.jarvis.ipc.request('clipboard_paste', {});
+
+if (result.kind === 'text') {
+    console.log('Clipboard text:', result.text);
+} else if (result.kind === 'image') {
+    console.log('Clipboard image:', result.data_url);
+}
+```
+
+**Response:**
+```json
+{
+  "kind": "text",
+  "text": "clipboard content"
+}
+```
+or
+```json
+{
+  "kind": "image",
+  "data_url": "data:image/png;base64,..."
+}
+```
+
+---
+
+### Terminal Input
+
+#### pty_input
+
+Send input to the PTY (for terminal emulator panes).
+
+<ParamField path="kind" type="string" default="pty_input">
+  Message type.
+</ParamField>
+
+<ParamField path="payload" type="object">
+  <ParamField path="data" type="string" required>
+    Input data to send to the PTY.
+  </ParamField>
+</ParamField>
+
+**JavaScript:**
+```javascript
+window.jarvis.ipc.send('pty_input', {
+    data: 'ls -la\n'
+});
+```
+
+**Use case:** Used by `xterm.js` to send keyboard input to the shell.
+
+---
+
+### Command Palette
+
+#### palette_click
+
+User clicked an item in the command palette.
+
+<ParamField path="kind" type="string" default="palette_click">
+  Message type.
+</ParamField>
+
+<ParamField path="payload" type="object">
+  <ParamField path="index" type="number" required>
+    Index of the clicked item.
+  </ParamField>
+</ParamField>
+
+**JavaScript:**
+```javascript
+window.jarvis.ipc.send('palette_click', { index: 2 });
+```
+
+---
+
+#### palette_hover
+
+User hovered over an item in the command palette.
+
+<ParamField path="kind" type="string" default="palette_hover">
+  Message type.
+</ParamField>
+
+<ParamField path="payload" type="object">
+  <ParamField path="index" type="number" required>
+    Index of the hovered item.
+  </ParamField>
+</ParamField>
+
+**JavaScript:**
+```javascript
+window.jarvis.ipc.send('palette_hover', { index: 1 });
+```
+
+---
+
+#### palette_dismiss
+
+User dismissed the command palette (clicked outside or pressed Escape).
+
+<ParamField path="kind" type="string" default="palette_dismiss">
+  Message type.
+</ParamField>
+
+<ParamField path="payload" type="{}">
+  Empty object.
+</ParamField>
+
+**JavaScript:**
+```javascript
+window.jarvis.ipc.send('palette_dismiss', {});
+```
+
+---
+
+### Debug Events
+
+#### debug_event
+
+Send a debug event to Rust for logging.
+
+<ParamField path="kind" type="string" default="debug_event">
+  Message type.
+</ParamField>
+
+<ParamField path="payload" type="object">
+  Event details (arbitrary JSON).
+  
+  <Expandable title="Common Fields">
+    <ParamField path="type" type="string" required>
+      Event type (`mousedown`, `keydown`, `focus`, `blur`).
+    </ParamField>
+    
+    <ParamField path="x" type="number" optional>
+      Mouse X coordinate (for mouse events).
+    </ParamField>
+    
+    <ParamField path="y" type="number" optional>
+      Mouse Y coordinate (for mouse events).
+    </ParamField>
+    
+    <ParamField path="key" type="string" optional>
+      Key name (for keyboard events).
+    </ParamField>
+    
+    <ParamField path="target" type="string" optional>
+      Event target element.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+**JavaScript:**
+```javascript
+window.jarvis.ipc.send('debug_event', {
+    type: 'mousedown',
+    x: 100,
+    y: 200,
+    target: 'BUTTON#submit'
+});
+```
+
+**Use case:** Temporary diagnostic logging.
+
+---
+
+## Custom Messages
+
+You can send custom messages from your WebView content:
+
+**JavaScript:**
+```javascript
+// Send a custom message
+window.jarvis.ipc.send('my_custom_event', {
+    action: 'do_something',
+    data: { foo: 'bar' }
+});
+```
+
+**Rust:**
+```rust
+use jarvis_webview::{WebViewEvent, IpcMessage};
+
+match event {
+    WebViewEvent::IpcMessage { pane_id, body } => {
+        if let Some(msg) = IpcMessage::from_json(&body) {
+            match msg.kind.as_str() {
+                "my_custom_event" => {
+                    // Handle custom message
+                    println!("Custom event: {:?}", msg.payload);
+                }
+                _ => {}
+            }
+        }
+    }
+    _ => {}
+}
+```
+
+## Request-Response Pattern
+
+For messages that need a response, use `request()` instead of `send()`:
+
+**JavaScript:**
+```javascript
+try {
+    const result = await window.jarvis.ipc.request('get_config', {});
+    console.log('Config:', result);
+} catch (error) {
+    console.error('Request failed:', error);
+}
+```
+
+**Rust:**
+```rust
+// Parse request ID from payload
+let req_id = payload["_reqId"].as_u64();
+
+// ... handle request ...
+
+// Send response back to JavaScript
+let response = json!({
+    "_reqId": req_id,
+    "result": { /* response data */ }
+});
+
+let js = js_dispatch_message("response", &response);
+handle.eval(&js);
+```
+
+The request will automatically resolve/reject the JavaScript promise.
+
+## See Also
+
+- [IPC Events](/api/ipc-events) — Rust to JavaScript events
+- [`jarvis-webview`](/api/jarvis-webview) — WebView API reference

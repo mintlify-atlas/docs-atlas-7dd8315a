@@ -1,0 +1,374 @@
+---
+title: Keybindings
+description: Customize keyboard shortcuts in Jarvis for panels, navigation, and commands
+---
+
+## Overview
+
+Jarvis provides fully customizable keyboard shortcuts for all major actions. Keybindings are defined in the `[keybinds]` section of `config.toml` using a simple modifier+key format.
+
+<Info>
+Keybinds are validated for uniqueness—duplicate bindings will produce a validation error.
+</Info>
+
+## Keybind Format
+
+### Basic Format
+
+```
+Modifier+Key
+```
+
+Where **Modifier** is one of:
+- `Cmd` (macOS Command / Windows Super)
+- `Option` (macOS Option / Windows Alt)
+- `Control` (Ctrl)
+- `Shift`
+
+### Multiple Modifiers
+
+```
+Cmd+Shift+G
+Option+Control+T
+```
+
+### Double Press
+
+```
+Escape+Escape
+```
+
+<Note>
+Special keys like `Tab`, `Escape`, `Enter`, `Space`, and arrow keys can be used as the key portion.
+</Note>
+
+## Default Keybindings
+
+### Voice & Assistant
+
+<ParamField path="push_to_talk" type="string" default="Option+Period">
+  Activate push-to-talk for voice input
+</ParamField>
+
+<ParamField path="open_assistant" type="string" default="Cmd+G">
+  Open the AI assistant panel
+</ParamField>
+
+### Panel Management
+
+<ParamField path="new_panel" type="string" default="Cmd+T">
+  Open a new terminal panel
+</ParamField>
+
+<ParamField path="close_panel" type="string" default="Escape+Escape">
+  Close the current panel (double press Escape)
+</ParamField>
+
+<ParamField path="close_pane" type="string" default="Cmd+W">
+  Close the current pane
+</ParamField>
+
+### Focus Navigation
+
+<ParamField path="focus_panel_1" type="string" default="Cmd+1">
+  Focus panel 1
+</ParamField>
+
+<ParamField path="focus_panel_2" type="string" default="Cmd+2">
+  Focus panel 2
+</ParamField>
+
+<ParamField path="focus_panel_3" type="string" default="Cmd+3">
+  Focus panel 3
+</ParamField>
+
+<ParamField path="focus_panel_4" type="string" default="Cmd+4">
+  Focus panel 4
+</ParamField>
+
+<ParamField path="focus_panel_5" type="string" default="Cmd+5">
+  Focus panel 5
+</ParamField>
+
+<ParamField path="cycle_panels" type="string" default="Tab">
+  Cycle to the next panel
+</ParamField>
+
+<ParamField path="cycle_panels_reverse" type="string" default="Shift+Tab">
+  Cycle to the previous panel
+</ParamField>
+
+### Splitting & Tiling
+
+<ParamField path="split_vertical" type="string" default="Cmd+D">
+  Split the current pane vertically (top/bottom)
+</ParamField>
+
+<ParamField path="split_horizontal" type="string" default="Cmd+Shift+D">
+  Split the current pane horizontally (left/right)
+</ParamField>
+
+### Window & UI
+
+<ParamField path="toggle_fullscreen" type="string" default="Cmd+F">
+  Toggle fullscreen mode
+</ParamField>
+
+<ParamField path="open_settings" type="string" default="Cmd+,">
+  Open settings panel
+</ParamField>
+
+<ParamField path="open_chat" type="string" default="Cmd+J">
+  Open chat panel
+</ParamField>
+
+<ParamField path="command_palette" type="string" default="Cmd+Shift+P">
+  Open the command palette
+</ParamField>
+
+### Clipboard
+
+<ParamField path="copy" type="string" default="Cmd+C">
+  Copy selection to clipboard
+</ParamField>
+
+<ParamField path="paste" type="string" default="Cmd+V">
+  Paste from clipboard
+</ParamField>
+
+## Customizing Keybindings
+
+### Example: Custom Keybinds
+
+```toml config.toml
+[keybinds]
+push_to_talk = "Control+Space"
+new_panel = "Cmd+N"
+close_panel = "Cmd+W"
+toggle_fullscreen = "Cmd+Enter"
+command_palette = "Cmd+K"
+```
+
+### Example: Vim-Style Navigation
+
+```toml config.toml
+[keybinds]
+cycle_panels = "Cmd+L"
+cycle_panels_reverse = "Cmd+H"
+split_vertical = "Cmd+S"
+split_horizontal = "Cmd+V"
+```
+
+### Example: Alternative Layouts
+
+```toml config.toml
+[keybinds]
+# Use Control instead of Cmd for cross-platform consistency
+new_panel = "Control+T"
+close_panel = "Control+W"
+focus_panel_1 = "Control+1"
+focus_panel_2 = "Control+2"
+focus_panel_3 = "Control+3"
+```
+
+## Keybind Validation
+
+Jarvis validates keybindings to ensure no conflicts:
+
+<Accordion title="Duplicate Detection">
+If two different actions share the same key combination, you'll see a validation error:
+
+```
+ConfigError::ValidationError: duplicate keybind 'Cmd+G': assigned to both 'open_assistant' and 'push_to_talk'
+```
+
+The error message shows:
+- The conflicting key combination
+- Both action names that share the binding
+</Accordion>
+
+<Warning>
+All keybind values are checked for duplicates during config validation. The previous valid config remains in effect if validation fails.
+</Warning>
+
+## Complete Keybind Reference
+
+Here's the full list of customizable keybindings:
+
+<CodeGroup>
+
+```toml Default Keybinds
+[keybinds]
+push_to_talk = "Option+Period"
+open_assistant = "Cmd+G"
+new_panel = "Cmd+T"
+close_panel = "Escape+Escape"
+toggle_fullscreen = "Cmd+F"
+open_settings = "Cmd+,"
+open_chat = "Cmd+J"
+focus_panel_1 = "Cmd+1"
+focus_panel_2 = "Cmd+2"
+focus_panel_3 = "Cmd+3"
+focus_panel_4 = "Cmd+4"
+focus_panel_5 = "Cmd+5"
+cycle_panels = "Tab"
+cycle_panels_reverse = "Shift+Tab"
+split_vertical = "Cmd+D"
+split_horizontal = "Cmd+Shift+D"
+close_pane = "Cmd+W"
+command_palette = "Cmd+Shift+P"
+copy = "Cmd+C"
+paste = "Cmd+V"
+```
+
+```toml Minimal Keybinds
+[keybinds]
+# Only override the keybinds you want to change
+new_panel = "Cmd+N"
+command_palette = "Cmd+P"
+```
+
+</CodeGroup>
+
+## Platform Differences
+
+### macOS
+
+- `Cmd` maps to the Command (⌘) key
+- `Option` maps to the Option (⌥) key
+- `Control` maps to Control (⌃)
+
+### Windows & Linux
+
+- `Cmd` maps to the Super/Windows key
+- `Option` maps to Alt
+- `Control` maps to Ctrl
+
+<Note>
+For cross-platform configs, consider using `Control` instead of `Cmd` to maintain consistency across operating systems.
+</Note>
+
+## Advanced: Keybind API
+
+### Accessing Keybinds Programmatically
+
+```rust
+use jarvis_config::keybinds::all_keybinds;
+
+let config = load_config()?;
+let binds = all_keybinds(&config.keybinds);
+
+for (name, binding) in binds {
+    println!("{name}: {binding}");
+}
+```
+
+### Validating Keybinds
+
+```rust
+use jarvis_config::keybinds::validate_no_duplicates;
+
+let config = load_config()?;
+validate_no_duplicates(&config.keybinds)?;
+```
+
+### KeybindConfig Structure
+
+```rust
+pub struct KeybindConfig {
+    pub push_to_talk: String,
+    pub open_assistant: String,
+    pub new_panel: String,
+    pub close_panel: String,
+    pub toggle_fullscreen: String,
+    pub open_settings: String,
+    pub open_chat: String,
+    pub focus_panel_1: String,
+    pub focus_panel_2: String,
+    pub focus_panel_3: String,
+    pub focus_panel_4: String,
+    pub focus_panel_5: String,
+    pub cycle_panels: String,
+    pub cycle_panels_reverse: String,
+    pub split_vertical: String,
+    pub split_horizontal: String,
+    pub close_pane: String,
+    pub command_palette: String,
+    pub copy: String,
+    pub paste: String,
+}
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Keybind not working">
+    Check:
+    - Key combination is correctly formatted (e.g., `Cmd+T`, not `CMD+t`)
+    - No conflicting global system shortcuts
+    - Modifier keys match your platform (`Cmd` for macOS, `Control` for cross-platform)
+  </Accordion>
+  
+  <Accordion title="Duplicate keybind error">
+    Search your config for the duplicate key combination and assign one of the actions to a different binding.
+  </Accordion>
+  
+  <Accordion title="Special characters">
+    Some special characters may need escaping in TOML strings:
+    ```toml
+    # Use quotes for special characters
+    my_keybind = "Cmd+,"  # Works for comma
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Examples by Use Case
+
+### Developer Workflow
+
+```toml config.toml
+[keybinds]
+# Quick panel creation and navigation
+new_panel = "Cmd+T"
+close_panel = "Cmd+W"
+cycle_panels = "Cmd+Tab"
+cycle_panels_reverse = "Cmd+Shift+Tab"
+
+# Splitting for side-by-side code review
+split_horizontal = "Cmd+\\"
+split_vertical = "Cmd+-"
+
+# Quick access to assistant
+open_assistant = "Cmd+K"
+```
+
+### Streamer Setup
+
+```toml config.toml
+[keybinds]
+# One-handed operations
+push_to_talk = "F1"
+open_chat = "F2"
+toggle_fullscreen = "F11"
+
+# Minimal panel management
+new_panel = "Control+N"
+close_panel = "Control+W"
+```
+
+### Vim User
+
+```toml config.toml
+[keybinds]
+# Vim-inspired navigation
+cycle_panels = "Cmd+L"
+cycle_panels_reverse = "Cmd+H"
+
+# Consistent with vim splits
+split_vertical = "Cmd+S"
+split_horizontal = "Cmd+Shift+S"
+
+# Leader-based commands
+command_palette = "Space+Space"
+open_assistant = "Space+A"
+```

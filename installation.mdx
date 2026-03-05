@@ -1,0 +1,617 @@
+---
+title: Installation
+description: Detailed setup and configuration for Jarvis
+---
+
+# Installation Guide
+
+This guide covers detailed installation steps, configuration options, and troubleshooting for Jarvis.
+
+## System Requirements
+
+### macOS Version
+
+<Warning>
+  Jarvis currently only supports macOS. Linux and Windows support is not available.
+</Warning>
+
+Minimum macOS version: **macOS 13.0 (Ventura)** or later
+
+The setup script checks your macOS version automatically:
+
+```bash setup.sh
+# Check macOS version (13.0+)
+MACOS_VERSION=$(sw_vers -productVersion | cut -d. -f1)
+if [[ "$MACOS_VERSION" -lt 13 ]]; then
+    echo "Error: macOS 13.0 (Monterey) or later is required"
+    exit 1
+fi
+```
+
+### Python Version
+
+**Required**: Python 3.10 or newer
+
+Jarvis requires modern Python for async features and type hints. The setup script will automatically detect compatible Python installations:
+
+```bash
+# Check available Python versions
+python3 --version
+
+# If you need to install Python 3.10+
+brew install python@3.12
+```
+
+<Note>
+  The setup script checks for `python3.12`, `python3.11`, `python3.10`, and `python3` in that order.
+</Note>
+
+### Swift Version
+
+**Required**: Swift 5.9 or newer
+
+Swift is included with Xcode Command Line Tools:
+
+```bash
+# Check if Swift is installed
+swift --version
+
+# Install Xcode Command Line Tools if needed
+xcode-select --install
+```
+
+### Hardware Requirements
+
+- **Metal-compatible GPU**: Required for the 3D orb renderer (all Macs from 2012+ support Metal)
+- **RAM**: 8GB minimum, 16GB recommended for multiple AI panels
+- **Storage**: ~2GB for dependencies and models
+- **Microphone**: Required for voice input features
+
+## Step-by-Step Installation
+
+### 1. Clone the Repository
+
+```bash
+git clone https://github.com/your-org/jarvis.git
+cd jarvis
+```
+
+### 2. Run the Setup Script
+
+Jarvis includes an automated setup script that handles all installation steps:
+
+```bash
+./setup.sh
+```
+
+<Accordion title="What the setup script does">
+  The setup script performs the following operations:
+  
+  1. **Pre-flight checks**:
+     - Verifies macOS version (13+)
+     - Checks for Xcode Command Line Tools
+     - Validates Swift installation
+     - Finds compatible Python 3.10+ installation
+  
+  2. **Directory structure**:
+     ```bash
+     mkdir -p jarvis/config
+     mkdir -p jarvis/commands
+     mkdir -p jarvis/session
+     mkdir -p tests
+     mkdir -p resources/themes
+     mkdir -p ~/.config/jarvis
+     ```
+  
+  3. **Python environment**:
+     ```bash
+     python3 -m venv .venv
+     source .venv/bin/activate
+     pip install --upgrade pip
+     pip install -r requirements.txt
+     ```
+  
+  4. **Swift build**:
+     ```bash
+     cd metal-app
+     swift build -c release
+     ```
+  
+  5. **Configuration**:
+     - Creates default config at `~/.config/jarvis/config.yaml`
+</Accordion>
+
+### 3. Install Python Dependencies
+
+If you skipped the setup script, manually install dependencies:
+
+```bash
+# Create virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install requirements
+pip install -r requirements.txt
+```
+
+<Accordion title="View requirements.txt">
+  ```txt requirements.txt
+  # Core dependencies
+  websockets>=12.0
+  sounddevice>=0.4
+  numpy>=1.24
+  google-genai>=1.0
+  httpx>=0.27
+  python-dotenv>=1.0
+  rich>=13.0
+  aiohttp>=3.9
+  pywhispercpp>=0.2
+  
+  # Configuration
+  pydantic>=2.6
+  pyyaml>=6.0
+  
+  # Crypto
+  cryptography>=42.0
+  
+  # Testing
+  pytest>=8.0
+  pytest-asyncio>=0.23
+  ```
+</Accordion>
+
+### 4. Build the Metal App
+
+Compile the Swift/Metal frontend:
+
+```bash
+cd metal-app
+swift build -c release
+```
+
+<CodeGroup>
+```bash Release Build (Recommended)
+# Optimized for performance
+swift build -c release
+```
+
+```bash Debug Build (Development)
+# Faster compile, includes debug symbols
+swift build
+```
+</CodeGroup>
+
+The compiled binary will be at:
+- **Release**: `metal-app/.build/release/JarvisBootup`
+- **Debug**: `metal-app/.build/debug/JarvisBootup`
+
+## Configuration
+
+### Environment Variables
+
+Create a `.env` file in the project root:
+
+```bash
+touch .env
+```
+
+Add your credentials:
+
+```bash .env
+# Required for Claude Code assistant
+CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token
+
+# Optional: enables Gemini-powered voice routing
+GOOGLE_API_KEY=your-gemini-api-key
+
+# Optional: custom presence server
+PRESENCE_URL=wss://your-presence-server.com
+
+# Optional: custom trivia game URL
+TRIVIA_URL=https://your-trivia-instance.com
+```
+
+<Warning>
+  **Never commit `.env` to version control**. Add it to `.gitignore`:
+  ```bash
+  echo ".env" >> .gitignore
+  ```
+</Warning>
+
+### Claude OAuth Token Setup
+
+The code assistant skill uses the Claude Agent SDK, which requires OAuth authentication.
+
+<Steps>
+  <Step title="Ensure Claude Max subscription">
+    You need an active [Claude Max subscription](https://claude.ai/upgrade) to use the Agent SDK.
+  </Step>
+  
+  <Step title="Run the login script">
+    ```bash
+    ./login.sh
+    ```
+    
+    This opens the Claude Code OAuth flow in your browser.
+  </Step>
+  
+  <Step title="Authenticate in browser">
+    Follow the prompts to log in with your Claude account.
+  </Step>
+  
+  <Step title="Token extracted automatically">
+    The script extracts the access token from macOS Keychain and writes it to `.env`:
+    
+    ```bash login.sh
+    # Pull token from macOS Keychain
+    OAUTH_TOKEN=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null \
+        | python3 -c "import sys,json; print(json.load(sys.stdin)['claudeAiOauth']['accessToken'])")
+    
+    # Update .env file
+    if grep -q "CLAUDE_CODE_OAUTH_TOKEN" "$ENV_FILE" 2>/dev/null; then
+        sed -i '' "s|^CLAUDE_CODE_OAUTH_TOKEN=.*|CLAUDE_CODE_OAUTH_TOKEN=$OAUTH_TOKEN|" "$ENV_FILE"
+    else
+        echo "CLAUDE_CODE_OAUTH_TOKEN=$OAUTH_TOKEN" >> "$ENV_FILE"
+    fi
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  **Token expiration**: OAuth tokens expire periodically. If the code assistant stops authenticating, re-run `./login.sh` to refresh the token.
+</Note>
+
+### Google Gemini API Key (Optional)
+
+Gemini powers voice routing and optional skills like domain hunting and paper matching.
+
+<Steps>
+  <Step title="Get API key">
+    Visit [Google AI Studio](https://makersuite.google.com/app/apikey) and create an API key.
+  </Step>
+  
+  <Step title="Add to .env">
+    ```bash
+    echo "GOOGLE_API_KEY=your-key-here" >> .env
+    ```
+  </Step>
+  
+  <Step title="Restart Jarvis">
+    ```bash
+    ./start.sh
+    ```
+    
+    You should see: `Config loaded from ~/.config/jarvis/config.yaml` (no warnings about disabled skills)
+  </Step>
+</Steps>
+
+### Configuration File
+
+Jarvis creates a YAML config at `~/.config/jarvis/config.yaml` on first run:
+
+```bash
+# View current config
+cat ~/.config/jarvis/config.yaml
+
+# Edit config
+nano ~/.config/jarvis/config.yaml
+```
+
+The setup script generates this automatically:
+
+```bash setup.sh
+# Run Python to create default config
+source .venv/bin/activate
+python3 -c "from jarvis.config.loader import load_config; load_config()" 2>/dev/null
+```
+
+## Running Jarvis
+
+### Start Script
+
+The recommended way to launch Jarvis:
+
+```bash
+./start.sh
+```
+
+<Accordion title="What start.sh does">
+  ```bash start.sh
+  #!/bin/bash
+  set -e
+  cd "$(dirname "$0")"
+  
+  # Create venv if it doesn't exist
+  if [ ! -d ".venv" ]; then
+      echo "Creating virtual environment..."
+      python3 -m venv .venv
+  fi
+  
+  source .venv/bin/activate
+  
+  # Install/update dependencies
+  pip install -q -r requirements.txt
+  
+  # Build Metal app if binary is missing or sources changed
+  METAL_BIN="metal-app/.build/debug/JarvisBootup"
+  if [ ! -f "$METAL_BIN" ] || [ -n "$(find metal-app/Sources -newer "$METAL_BIN" 2>/dev/null)" ]; then
+      echo "Building Metal app..."
+      cd metal-app && swift build 2>&1 | tail -1 && cd ..
+  fi
+  
+  python main.py
+  ```
+  
+  The script:
+  1. Activates the virtual environment
+  2. Updates Python dependencies if needed
+  3. Rebuilds the Metal app if source files changed
+  4. Launches `main.py`
+</Accordion>
+
+### Manual Launch
+
+You can also run components manually:
+
+```bash
+# Activate virtualenv
+source .venv/bin/activate
+
+# Run main Python process
+python main.py
+```
+
+### Command-Line Options
+
+```bash
+# Launch with custom base path
+python main.py --base /path/to/jarvis
+
+# Launch Metal app directly (advanced)
+./metal-app/.build/debug/JarvisBootup --jarvis --base $(pwd)
+```
+
+## Controls & Shortcuts
+
+Once Jarvis is running, use these controls:
+
+<CardGroup cols={2}>
+  <Card title="Push-to-Talk">
+    **Left Control** (hold) — Primary PTT key
+    
+    **Option + Period** — Alternative PTT hotkey
+  </Card>
+  
+  <Card title="Navigation">
+    **Cmd + G** — Toggle hotkey overlay
+    
+    **Escape** — Close current panel or quit
+  </Card>
+</CardGroup>
+
+## Verification
+
+After installation, verify everything works:
+
+<Steps>
+  <Step title="Launch Jarvis">
+    ```bash
+    ./start.sh
+    ```
+    
+    Expected output:
+    ```
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    JARVIS — Personal AI Assistant
+    Metal display active. PTT: Left Control
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    ```
+  </Step>
+  
+  <Step title="Test voice input">
+    1. Hold **Left Control**
+    2. Say: "Help me with code"
+    3. Release the key
+    
+    A chat panel should open with the assistant ready.
+  </Step>
+  
+  <Step title="Test Metal rendering">
+    The 3D orb should:
+    - Animate smoothly (60 FPS)
+    - React to voice input when PTT is active
+    - Display the hex grid background
+  </Step>
+  
+  <Step title="Check logs">
+    ```bash
+    tail -f jarvis.log
+    ```
+    
+    Should show:
+    ```
+    === Jarvis starting ===
+    Config loaded from ~/.config/jarvis/config.yaml
+    Config sent to Swift
+    ```
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### Swift Build Errors
+
+<AccordionGroup>
+  <Accordion title="Command line tools not found">
+    ```bash
+    xcode-select --install
+    ```
+    
+    If that fails, install full Xcode from the App Store, then:
+    ```bash
+    sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+    ```
+  </Accordion>
+  
+  <Accordion title="Swift version too old">
+    Update Xcode Command Line Tools:
+    ```bash
+    softwareupdate --all --install --force
+    ```
+    
+    Or install the latest Xcode from the App Store.
+  </Accordion>
+  
+  <Accordion title="Build hangs or fails">
+    Clear Swift build cache:
+    ```bash
+    cd metal-app
+    rm -rf .build
+    swift build -c release
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Python Issues
+
+<AccordionGroup>
+  <Accordion title="Module not found errors">
+    Ensure virtual environment is activated:
+    ```bash
+    source .venv/bin/activate
+    pip install -r requirements.txt
+    ```
+  </Accordion>
+  
+  <Accordion title="Whisper model download fails">
+    The first run downloads the Whisper model. This can take a few minutes.
+    
+    Check logs:
+    ```bash
+    tail -f jarvis.log | grep whisper
+    ```
+    
+    Manual download:
+    ```bash
+    python -c "from pywhispercpp import Whisper; Whisper('base')"
+    ```
+  </Accordion>
+  
+  <Accordion title="sounddevice errors">
+    Install PortAudio:
+    ```bash
+    brew install portaudio
+    pip install --force-reinstall sounddevice
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Runtime Issues
+
+<AccordionGroup>
+  <Accordion title="Metal window doesn't open">
+    Check if the binary exists:
+    ```bash
+    ls -la metal-app/.build/debug/JarvisBootup
+    ```
+    
+    If missing, rebuild:
+    ```bash
+    cd metal-app && swift build && cd ..
+    ```
+  </Accordion>
+  
+  <Accordion title="No audio / microphone permission denied">
+    Grant microphone access:
+    1. **System Settings** → **Privacy & Security** → **Microphone**
+    2. Enable for Terminal (or your terminal app)
+    3. Restart Jarvis
+  </Accordion>
+  
+  <Accordion title="Claude assistant not responding">
+    Token may be expired or invalid:
+    ```bash
+    ./login.sh
+    ```
+    
+    Verify token is set:
+    ```bash
+    grep CLAUDE_CODE_OAUTH_TOKEN .env
+    ```
+    
+    Check for errors:
+    ```bash
+    tail -f jarvis.log | grep -i claude
+    ```
+  </Accordion>
+  
+  <Accordion title="Presence/chat not connecting">
+    Check presence server is reachable:
+    ```bash
+    # Default server
+    curl https://presence.jarvis.dev/health
+    ```
+    
+    Override with custom server in `.env`:
+    ```bash
+    PRESENCE_URL=wss://your-server.com
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Updating Jarvis
+
+Pull latest changes and rebuild:
+
+```bash
+# Update code
+git pull origin main
+
+# Update Python dependencies
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# Rebuild Metal app
+cd metal-app
+swift build -c release
+cd ..
+
+# Restart Jarvis
+./start.sh
+```
+
+## Uninstallation
+
+To remove Jarvis:
+
+```bash
+# Remove config
+rm -rf ~/.config/jarvis
+
+# Remove project directory
+cd ..
+rm -rf jarvis
+
+# (Optional) Revoke Claude OAuth token
+# Log into claude.ai and revoke the "Claude Code" integration
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="bolt" href="/quickstart">
+    Jump straight into using Jarvis
+  </Card>
+  
+  <Card title="Skills & Commands" icon="wand-magic-sparkles" href="/features/ai-assistants">
+    Learn all available voice commands
+  </Card>
+  
+  <Card title="Plugin System" icon="plug" href="/plugins/overview">
+    Build custom panels and integrations
+  </Card>
+  
+  <Card title="Manual" icon="book" href="/architecture/overview">
+    Complete technical documentation
+  </Card>
+</CardGroup>

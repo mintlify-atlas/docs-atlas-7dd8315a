@@ -1,0 +1,425 @@
+---
+title: Chat Protocol
+description: Multi-channel live chat with E2E encryption, signatures, and DMs
+---
+
+Jarvis includes a multi-channel live chat system backed by Supabase Realtime. The chat supports public channels, end-to-end encrypted direct messages, cryptographic message signing, and client-side content moderation.
+
+## Architecture
+
+```
+Chat WebView (HTML/JS)
+  |
+  +-- Supabase JS SDK
+  |     |
+  |     +-- wss://<project>.supabase.co/realtime/v1/websocket
+  |
+  +-- jarvis.ipc.request('crypto', ...) --> CryptoService (Rust)
+  |
+  +-- AutoMod (client-side JS)
+```
+
+The chat runs entirely in a WebView panel (`jarvis://localhost/chat/index.html`) and connects directly to Supabase Realtime. The Rust backend provides cryptographic operations via IPC but does not proxy chat traffic.
+
+**Source files:**
+- `jarvis-rs/assets/panels/chat/index.html`
+- `jarvis-rs/crates/jarvis-social/src/chat.rs`
+- `jarvis-rs/crates/jarvis-platform/src/crypto.rs`
+
+## Channels
+
+Seven channels are pre-configured in the chat panel:
+
+| Channel ID | Display Name | Description |
+|------------|--------------|-------------|
+| `jarvis-livechat` | `# general` | Primary channel with presence tracking |
+| `jarvis-livechat-discord` | `# discord` | Discord community discussion |
+| `jarvis-livechat-showoff` | `# showoff` | Share your projects |
+| `jarvis-livechat-help` | `# help` | Technical support |
+| `jarvis-livechat-random` | `# random` | Off-topic conversation |
+| `jarvis-livechat-games` | `# games` | Gaming discussion and invites |
+| `jarvis-livechat-memes` | `# memes` | Memes and humor |
+
+<Info>
+  All channels are subscribed at startup so messages on background channels are buffered and unread counts are tracked. Channel switching is instant.
+</Info>
+
+## Message Structure
+
+### Standard Message
+
+```json
+{
+  "id": "<uuid>",
+  "userId": "<uuid>",
+  "nick": "alice",
+  "ts": 1700000000000,
+  "text": "hello world",
+  "sig": "<base64 ECDSA signature>",
+  "pubkey": "<base64 SPKI DER>",
+  "fingerprint": "aa:bb:cc:dd:ee:ff:00:11"
+}
+```
+
+### Encrypted DM
+
+```json
+{
+  "id": "<uuid>",
+  "userId": "<uuid>",
+  "nick": "alice",
+  "ts": 1700000000000,
+  "iv": "<base64 12-byte IV>",
+  "ct": "<base64 AES-256-GCM ciphertext>",
+  "sig": "<base64 ECDSA signature>",
+  "pubkey": "<base64 SPKI DER>",
+  "fingerprint": "aa:bb:cc:dd:ee:ff:00:11"
+}
+```
+
+<Info>
+  DM signatures are computed over `id|userId|nick|ts|iv|ct` (the ciphertext), not plaintext, to prevent chosen-plaintext attacks on the signature oracle.
+</Info>
+
+## Message Flow
+
+### Sending a Message
+
+<Steps>
+  <Step title="User Input">
+    User types a message and presses Enter.
+  </Step>
+
+  <Step title="AutoMod Checks">
+    Sender-side moderation runs:
+    - Keyword filter (banned words)
+    - Spam detection (repeated characters, duplicate messages)
+    - Rate limit (5 messages per 10 seconds)
+  </Step>
+
+  <Step title="Emoji Processing">
+    Emoji shortcodes like `:smile:` and `:fire:` are replaced with Unicode emoji.
+  </Step>
+
+  <Step title="Message Signing">
+    The message is signed with the user's ECDSA P-256 key:
+
+    ```javascript
+    const signature = await Identity.sign(
+      `${id}|${userId}|${nick}|${ts}|${text}`
+    );
+    ```
+  </Step>
+
+  <Step title="Broadcast">
+    The message is broadcast on the active Supabase channel and immediately rendered locally with `verifyStatus: 'self'`.
+  </Step>
+</Steps>
+
+### Receiving a Message
+
+<Steps>
+  <Step title="Channel Subscription">
+    A broadcast arrives on the Supabase channel subscription.
+  </Step>
+
+  <Step title="Self-Echo Prevention">
+    If `payload.userId === this.userId`, the message is dropped.
+  </Step>
+
+  <Step title="AutoMod Validation">
+    Receiver-side checks:
+    - Keyword filter on text and nickname
+    - Spam check (repeated character ratio, identical message history)
+    - Per-user rate limiting
+  </Step>
+
+  <Step title="Signature Verification">
+    ECDSA signature is verified via IPC:
+
+    ```javascript
+    const valid = await Identity.verify(data, sig, pubkey);
+    ```
+  </Step>
+
+  <Step title="TOFU Trust Check">
+    The TOFU (Trust On First Use) store checks if the fingerprint matches the previously-seen identity for this nickname:
+
+    - ✅ **Verified**: Signature valid, fingerprint matches or is new
+    - ⚠️ **Key Changed**: Signature valid but fingerprint differs (possible impersonation)
+    - ❌ **Invalid**: Signature verification failed
+    - ❔ **Unverified**: No signature present
+  </Step>
+
+  <Step title="Render">
+    The message is rendered in the chat UI with the appropriate verification badge.
+  </Step>
+</Steps>
+
+## Chat History (Backend)
+
+The Rust backend (`jarvis-rs/crates/jarvis-social/src/chat.rs`) provides an in-memory ring buffer for storing chat history:
+
+```rust
+pub struct ChatMessage {
+    pub id: String,
+    pub user_id: String,
+    pub display_name: String,
+    pub channel: String,
+    pub content: String,
+    pub timestamp: String,
+    pub reply_to: Option<String>,
+}
+```
+
+### Configuration
+
+```rust
+pub struct ChatHistoryConfig {
+    pub max_messages_per_channel: usize, // Default: 500
+}
+```
+
+When the buffer is full, the oldest message is evicted on push. The WebView maintains its own parallel buffer (also capped at 500 messages per channel).
+
+### API
+
+```rust
+let mut history = ChatHistory::new(ChatHistoryConfig::default());
+
+// Add a message
+history.push(msg);
+
+// Get recent messages (oldest first)
+let messages = history.recent("general", 100);
+
+// Get all messages in a channel
+let all = history.all("general");
+
+// Clear a channel
+history.clear_channel("general");
+
+// List active channels
+let channels = history.active_channels();
+
+// Total message count
+let count = history.total_messages();
+```
+
+## Direct Messages (DMs)
+
+Users can open end-to-end encrypted DMs from the online users dropdown.
+
+<Steps>
+  <Step title="Initiate DM">
+    User clicks a peer's "DM" button in the dropdown.
+  </Step>
+
+  <Step title="Derive Shared Key">
+    An ECDH shared key is derived:
+
+    ```javascript
+    const keyHandle = await Identity.deriveSharedKey(otherDhPubkey);
+    ```
+  </Step>
+
+  <Step title="Create DM Channel">
+    A deterministic channel name is computed from both fingerprints (sorted, concatenated with `jarvis-dm-` prefix):
+
+    ```javascript
+    const channelId = `jarvis-dm-${[fp1, fp2].sort().join('-')}`;
+    ```
+  </Step>
+
+  <Step title="Subscribe">
+    A new Supabase channel subscription is created for this DM.
+  </Step>
+
+  <Step title="Encrypt Messages">
+    Outbound messages are encrypted with AES-256-GCM:
+
+    ```javascript
+    const { iv, ct } = await Crypto.encrypt(plaintext, keyHandle);
+    ```
+  </Step>
+
+  <Step title="Decrypt Messages">
+    Inbound messages are decrypted:
+
+    ```javascript
+    const plaintext = await Crypto.decrypt(iv, ct, keyHandle);
+    ```
+  </Step>
+</Steps>
+
+<Info>
+  The relay server and Supabase backend see only ciphertext. Only the two DM participants can decrypt the messages.
+</Info>
+
+## Image Messages
+
+Users can paste images (Ctrl+V) or drag-and-drop image files into the chat input.
+
+### Image Processing
+
+1. **Compression**: Images are compressed via HTML canvas to JPEG at 0.5 quality, max width 300px
+2. **Encoding**: Produces a `data:image/jpeg;base64,...` data URL
+3. **Sending**: The data URL is sent as the `text` field of a normal message
+4. **Rendering**: Images are rendered as `<img>` elements with a click-to-lightbox viewer
+
+### Limits
+
+| Parameter | Value |
+|-----------|-------|
+| `MAX_IMAGE_LEN` | 150,000 chars (~100 KB base64) |
+| `IMAGE_MAX_WIDTH` | 300 px |
+| `IMAGE_QUALITY` | 0.5 |
+
+<Code>
+  ```javascript
+  // Image paste handler
+  inputBox.addEventListener('paste', async (e) => {
+    const items = e.clipboardData.items;
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        const dataUrl = await compressImage(file);
+        if (dataUrl.length <= MAX_IMAGE_LEN) {
+          sendMessage(dataUrl);
+        }
+      }
+    }
+  });
+  ```
+</Code>
+
+## Reactions
+
+Messages support emoji reactions. Reactions are broadcast as separate `reaction` events (unencrypted) with `{ msgId, emoji, userId, action }`.
+
+- A picker of 16 emoji is shown on hover
+- Reactions are tracked per message in local history
+- Persisted across channel switches
+
+```javascript
+// Send a reaction
+await channel.send({
+  type: 'broadcast',
+  event: 'reaction',
+  payload: {
+    msgId: '123',
+    emoji: '👍',
+    userId: 'alice-id',
+    action: 'add' // or 'remove'
+  }
+});
+```
+
+## AutoMod
+
+Client-side auto-moderation runs on both outgoing and incoming messages.
+
+### Keyword Filter
+
+A set of banned words is checked using pre-compiled word-boundary regexes (`\b<word>\b`, case-insensitive).
+
+```javascript
+const automod = new AutoMod();
+automod.addBanWord('spam');
+const result = automod.checkMessage('this is spam', 'alice');
+if (!result.allowed) {
+  console.log('Blocked:', result.reason);
+}
+```
+
+### Rate Limiting
+
+Sliding-window rate limiter tracks message timestamps per user:
+
+| Parameter | Default |
+|-----------|----------|
+| `RATE_LIMIT_COUNT` | 5 |
+| `RATE_LIMIT_WINDOW` | 10,000 ms |
+
+Both sender-side and receiver-side rate limits are enforced.
+
+### Spam Detection
+
+- **Repeated character ratio**: If >80% of a message (>5 chars) is the same character, it's blocked (`spam_repeated_chars`)
+- **Repeated message history**: If the last 3 messages from a user are identical, the message is blocked (`spam_repeated_message`)
+
+### Cleanup
+
+A periodic cleanup runs every 60 seconds to prune stale rate-limit entries and cap spam history to 200 users.
+
+## Reconnection
+
+If the primary channel drops, an exponential backoff reconnect strategy engages:
+
+| Parameter | Value |
+|-----------|-------|
+| Base delay | 2 s |
+| Max delay | 30 s |
+| Max attempts | 8 |
+| Jitter | 75-125% |
+
+After max attempts, the user is prompted to reload.
+
+## Configuration Reference
+
+From `jarvis-rs/crates/jarvis-config/src/schema/livechat.rs`:
+
+```toml
+[livechat]
+enabled = true
+server_port = 19847
+connection_timeout = 10  # seconds
+
+[livechat.nickname]
+default = ""
+persist = true
+allow_change = true
+
+[livechat.nickname.validation]
+min_length = 1
+max_length = 20
+pattern = "^[a-zA-Z0-9_\\- ]+$"
+
+[livechat.automod]
+enabled = true
+filter_profanity = true
+rate_limit = 5
+max_message_length = 500
+spam_detection = true
+```
+
+## Security
+
+### XSS Prevention
+
+All user-generated content (nicknames, message text) is rendered using `element.textContent = value` rather than `innerHTML`, preventing XSS injection.
+
+### SRI for External Dependencies
+
+The Supabase JavaScript SDK is loaded with Subresource Integrity:
+
+```html
+<script
+  src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.97.0/dist/umd/supabase.min.js"
+  integrity="sha384-1+ItoWbWcmVSm+Y+dJaUt4SEWNA21/jxef+Z0TSHHVy/dEUxEUEnZ1bHn6GT5hj+"
+  crossorigin="anonymous">
+</script>
+```
+
+This ensures the loaded script has not been tampered with.
+
+### TOFU Trust Store
+
+The Trust On First Use model records nickname-to-fingerprint bindings in `localStorage` under `jarvis-chat-tofu`. Key changes trigger visible warnings in the chat UI.
+
+```javascript
+// Example TOFU record
+{
+  "alice": "aa:bb:cc:dd:ee:ff:00:11"
+}
+```

@@ -1,0 +1,421 @@
+---
+title: 'Local Plugins'
+description: 'Full HTML/JS/CSS plugins with IPC bridge access and custom protocol support'
+---
+
+Local plugins are full HTML/JS/CSS applications that live in a folder on your filesystem. They are served through the `jarvis://` custom protocol, have access to the IPC bridge (`window.jarvis.ipc`), and can communicate bidirectionally with the Rust backend.
+
+## Folder Structure
+
+Local plugins live in the platform-specific plugins directory:
+
+| OS | Plugins directory |
+|----|-------------------|
+| macOS | `~/Library/Application Support/jarvis/plugins/` or `~/.config/jarvis/plugins/` |
+| Linux | `~/.config/jarvis/plugins/` |
+| Windows | `%APPDATA%\jarvis\plugins\` |
+
+Each plugin occupies its own subfolder. The folder name becomes the plugin's **ID** and is used in URLs:
+
+```
+jarvis://localhost/plugins/{folder-name}/{file}
+```
+
+A typical plugin folder looks like this:
+
+```
+~/.config/jarvis/plugins/
+  my-plugin/
+    plugin.toml          # Required: manifest file
+    index.html           # Entry point (configurable)
+    style.css            # Optional: stylesheets
+    app.js               # Optional: scripts
+    assets/              # Optional: images, fonts, etc.
+      icon.png
+      sounds/
+        click.mp3
+```
+
+## The Manifest: plugin.toml
+
+Every local plugin requires a `plugin.toml` file in its root folder. The manifest supports three fields:
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `name` | string | No | Folder name | Display name in the command palette |
+| `category` | string | No | `"Plugins"` | Palette category for grouping |
+| `entry` | string | No | `"index.html"` | Entry point HTML file |
+
+<Tip>
+All fields are optional. A completely empty `plugin.toml` is valid — the plugin will use the folder name as its display name, "Plugins" as its category, and `index.html` as its entry point.
+</Tip>
+
+### Minimal Valid Manifest
+
+```toml
+name = "My Timer"
+```
+
+### Full Manifest
+
+```toml
+name = "Project Dashboard"
+category = "Productivity"
+entry = "app.html"
+```
+
+## Discovery
+
+Plugin discovery is performed by the `discover_local_plugins()` function. This runs at startup and whenever "Reload Config" is dispatched.
+
+**The discovery algorithm:**
+
+<Steps>
+  <Step title="Scan the plugins directory">
+    Reads all entries in the plugins directory using `std::fs::read_dir`.
+  </Step>
+
+  <Step title="Filter directories">
+    Skips any entry that is not a directory.
+  </Step>
+
+  <Step title="Check for manifest">
+    For each directory, checks for the existence of `plugin.toml`.
+  </Step>
+
+  <Step title="Parse manifest">
+    Reads and parses the manifest file using TOML deserialization.
+  </Step>
+
+  <Step title="Construct LocalPlugin">
+    Constructs a `LocalPlugin` struct with the folder name as `id`, the parsed `name` (or folder name as fallback), `category`, and `entry`.
+  </Step>
+
+  <Step title="Register with ContentProvider">
+    Each plugin directory is registered with the `ContentProvider` to enable the custom protocol handler.
+  </Step>
+</Steps>
+
+<Tip>
+Directories without a `plugin.toml` are silently ignored. Manifests that fail to parse produce a warning log.
+</Tip>
+
+## Creating Your First Plugin
+
+<Steps>
+  <Step title="Create the plugin folder">
+    ```bash
+    # Linux/macOS
+    mkdir -p ~/.config/jarvis/plugins/hello-world
+
+    # Windows (PowerShell)
+    mkdir "$env:APPDATA\jarvis\plugins\hello-world"
+    ```
+  </Step>
+
+  <Step title="Create the manifest">
+    Create `plugin.toml` in the plugin folder:
+
+    ```toml
+    name = "Hello World"
+    category = "Tools"
+    ```
+  </Step>
+
+  <Step title="Create the entry point">
+    Create `index.html` in the plugin folder:
+
+    ```html
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        body {
+          margin: 0;
+          padding: 24px;
+          background: transparent;
+          color: var(--color-text, #cdd6f4);
+          font-family: var(--font-ui, sans-serif);
+          font-size: var(--font-ui-size, 13px);
+        }
+        h1 { color: var(--color-primary, #cba6f7); }
+        button {
+          background: var(--color-primary, #cba6f7);
+          color: var(--color-background, #1e1e2e);
+          border: none;
+          padding: 8px 16px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 14px;
+        }
+      </style>
+    </head>
+    <body>
+      <h1>Hello from a Jarvis Plugin!</h1>
+      <p>This is running inside the jarvis:// protocol with full IPC access.</p>
+      <button onclick="ping()">Ping Jarvis</button>
+      <p id="result"></p>
+
+      <script>
+        async function ping() {
+          window.jarvis.ipc.send('ping', {});
+          window.jarvis.ipc.on('pong', () => {
+            document.getElementById('result').textContent = 'Pong received!';
+          });
+        }
+      </script>
+    </body>
+    </html>
+    ```
+  </Step>
+
+  <Step title="Load the plugin">
+    Open the command palette and select "Reload Config". Your plugin appears under the "Tools" category. Select "Hello World" and it loads in the focused pane.
+  </Step>
+</Steps>
+
+## Styling and Theming
+
+Plugins run in a transparent webview with the Jarvis theme's CSS variables injected into every page. Using these variables ensures your plugin matches the user's chosen theme automatically.
+
+### Available CSS Variables
+
+<CodeGroup>
+```css Colors
+--color-primary: #cba6f7;
+--color-secondary: #f5c2e7;
+--color-background: #1e1e2e;
+--color-panel-bg: rgba(30,30,46,0.88);
+--color-text: #cdd6f4;
+--color-text-muted: #6c7086;
+--color-border: #181825;
+--color-border-focused: rgba(203,166,247,0.15);
+--color-success: #a6e3a1;
+--color-warning: #f9e2af;
+--color-error: #f38ba8;
+```
+
+```css Fonts
+--font-family: Menlo;
+--font-size: 13px;
+--font-ui: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+--font-ui-size: 13px;
+--font-title-size: 14px;
+--line-height: 1.6;
+```
+
+```css Layout
+--border-radius: 8px;
+```
+</CodeGroup>
+
+<Tip>
+These variables update automatically when the user changes themes or reloads config.
+</Tip>
+
+### Starter Template
+
+```css
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--color-panel-bg, rgba(30,30,46,0.88));
+  color: var(--color-text, #cdd6f4);
+  font-family: var(--font-ui, sans-serif);
+  font-size: var(--font-ui-size, 13px);
+  line-height: var(--line-height, 1.6);
+  padding: 16px;
+  overflow-y: auto;
+}
+h1, h2, h3 {
+  color: var(--color-primary, #cba6f7);
+  margin-bottom: 8px;
+}
+button {
+  background: var(--color-primary, #cba6f7);
+  color: var(--color-background, #1e1e2e);
+  border: none;
+  padding: 6px 14px;
+  border-radius: calc(var(--border-radius, 8px) / 2);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+}
+button:hover { opacity: 0.85; }
+input, textarea {
+  background: var(--color-background, #1e1e2e);
+  color: var(--color-text, #cdd6f4);
+  border: 1px solid var(--color-border, #181825);
+  padding: 6px 10px;
+  border-radius: calc(var(--border-radius, 8px) / 2);
+  font-family: inherit;
+  font-size: inherit;
+}
+input:focus, textarea:focus {
+  outline: none;
+  border-color: var(--color-primary, #cba6f7);
+}
+```
+
+<Tip>
+Always provide fallback values in your `var()` declarations (e.g., `var(--color-primary, #cba6f7)`) so the plugin renders correctly even if theme injection has not yet occurred.
+</Tip>
+
+## Asset Loading and MIME Types
+
+### Referencing Assets
+
+Your plugin can include any static assets. Reference them with relative paths in your HTML:
+
+```html
+<!-- These resolve via jarvis://localhost/plugins/my-plugin/... -->
+<link rel="stylesheet" href="style.css">
+<script src="app.js"></script>
+<img src="assets/logo.png">
+<audio src="assets/notification.mp3"></audio>
+```
+
+Relative paths work because the browser resolves them against the current URL (`jarvis://localhost/plugins/my-plugin/index.html`).
+
+### Supported MIME Types
+
+| Extension | MIME Type |
+|-----------|-----------||
+| `.html`, `.htm` | `text/html` |
+| `.css` | `text/css` |
+| `.js`, `.mjs` | `application/javascript` |
+| `.json` | `application/json` |
+| `.png` | `image/png` |
+| `.jpg`, `.jpeg` | `image/jpeg` |
+| `.gif` | `image/gif` |
+| `.svg` | `image/svg+xml` |
+| `.webp` | `image/webp` |
+| `.wasm` | `application/wasm` |
+| `.ico` | `image/x-icon` |
+| `.woff`, `.woff2` | `font/woff`, `font/woff2` |
+| `.ttf`, `.otf` | `font/ttf`, `font/otf` |
+| `.mp3`, `.ogg`, `.wav` | `audio/mpeg`, `audio/ogg`, `audio/wav` |
+| `.mp4`, `.webm` | `video/mp4`, `video/webm` |
+| `.txt` | `text/plain` |
+| `.xml` | `application/xml` |
+| (other) | `application/octet-stream` |
+
+<Tip>
+Files with unrecognized extensions are served as `application/octet-stream`, which may not render correctly in the webview.
+</Tip>
+
+### External Resources
+
+Plugins can load resources from the web. All `https://` and `http://` URLs are allowed:
+
+```html
+<!-- CDN libraries work fine -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter">
+```
+
+Standard browser CORS rules apply to `fetch()` and `XMLHttpRequest` calls.
+
+### WebAssembly
+
+`.wasm` files are served with the correct `application/wasm` MIME type, enabling you to load WebAssembly modules:
+
+```javascript
+const response = await fetch('jarvis://localhost/plugins/my-plugin/engine.wasm');
+const { instance } = await WebAssembly.instantiateStreaming(response);
+```
+
+## Security Model
+
+### Directory Traversal Protection
+
+Plugin assets are sandboxed to their own folder. The `ContentProvider` enforces this by canonicalizing both the plugin's base path and the requested file path, then verifying the file path starts with the base path.
+
+Attempting to access files outside the plugin directory returns a 404:
+
+```
+jarvis://localhost/plugins/my-plugin/../../etc/passwd             → 404
+jarvis://localhost/plugins/my-plugin/../other-plugin/secret.json  → 404
+```
+
+Symlinks that escape the plugin directory are also blocked because `std::fs::canonicalize` resolves symlinks to their real paths before the containment check.
+
+### What Plugins CAN Do
+
+- Read and write the system clipboard (via IPC)
+- Navigate the current pane to any URL
+- Make HTTP requests to any origin (standard browser CORS rules apply)
+- Load any `https://` resource
+- Read image files from disk (via the `read_file` IPC message, limited to 5 MB)
+- Send input to the terminal PTY
+- Open and close panels
+- Use localStorage for persistence (scoped to `jarvis://localhost` origin)
+- Start window drag operations
+- Log debug events to the Rust log
+
+### What Plugins CANNOT Do
+
+- Access the `file://` protocol directly
+- Execute `javascript:` URLs
+- Use `data:` URLs for navigation
+- Access other plugins' files via path traversal
+- Bypass the IPC allowlist (unknown message kinds are rejected)
+- Read arbitrary files from disk (only recognized image formats via `read_file`)
+- Execute arbitrary system commands
+
+## Hot Reload
+
+### Editing Plugin Files (HTML/JS/CSS)
+
+Since files are read from disk on every request, changes to your plugin's source files take effect the next time the plugin is loaded. You can:
+
+1. Press Escape to go back to the terminal, then re-open the plugin from the palette.
+2. Press `Cmd+R` / `Ctrl+R` to refresh the webview in-place (this key is not intercepted by Jarvis).
+
+<Tip>
+Option 2 is the fastest workflow during development.
+</Tip>
+
+### Adding or Removing Plugins
+
+Create or delete the plugin folder under `~/.config/jarvis/plugins/`, then trigger "Reload Config" from the command palette. The discovery runs again and the palette updates accordingly.
+
+### Editing plugin.toml
+
+Changes to the manifest (name, category, entry) require a "Reload Config" to take effect in the palette, since the manifest is only read during discovery.
+
+## Troubleshooting
+
+### Plugin doesn't appear in the palette
+
+1. **Check the folder location** — verify the plugin is in the correct platform-specific directory.
+2. **Check that `plugin.toml` exists** in the plugin's folder root.
+3. **Check for TOML syntax errors** — look for `"Failed to parse plugin manifest"` warnings in the Jarvis log.
+4. **Reload config** — open the palette and select "Reload Config".
+5. **Check for read errors** — look for `"Failed to read plugin manifest"` warnings in the log.
+
+### Plugin loads but shows a blank page
+
+1. **Check the entry point** — does `index.html` (or your custom entry) exist in the plugin folder?
+2. **Open DevTools** (right-click then "Inspect", or enable via `advanced.developer.inspector_enabled`) and check the console for errors.
+3. **Check the URL** — the plugin loads at `jarvis://localhost/plugins/{folder-name}/{entry}`. Make sure the folder name and entry file match.
+
+### IPC bridge is not available
+
+1. **Check `window.jarvis`** — it should exist even before your script runs.
+2. **Make sure you are loading via `jarvis://`**, not `file://` or `http://`. The IPC bridge is only injected for webviews created by Jarvis.
+
+### CSS variables not working
+
+1. **Use fallback values** — always write `var(--color-primary, #cba6f7)` with a fallback.
+2. **Check in DevTools** that the `:root` styles are being injected.
+
+### Escape key closes my plugin unexpectedly
+
+Pressing Escape when a plugin is loaded navigates back to the previous page. This is by design (same behavior as exiting a game). If you need Escape inside your plugin, capture it at the document level with `stopPropagation`, but be aware the capture-phase IPC listener may still see it.
+
+### Plugin assets return 404
+
+1. **Check relative paths** — assets should be relative to your HTML file: `<img src="icon.png">` not `<img src="/icon.png">`.
+2. **Check file extensions** — unknown extensions are served as `application/octet-stream` which may not render correctly.
+3. **No directory traversal** — `../` paths outside your plugin folder will 404.

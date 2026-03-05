@@ -1,0 +1,202 @@
+---
+title: 'Bookmark Plugins'
+description: 'Simple URL-based plugins configured in config.toml'
+---
+
+Bookmark plugins are the simplest form of Jarvis plugin: a name, a URL, and an optional category, all declared in your `config.toml` file. They require no files on disk and load any website directly in a Jarvis pane.
+
+## Configuration Format
+
+Bookmark plugins are defined in `config.toml` using the `[[plugins.bookmarks]]` array-of-tables syntax. Each entry supports three fields:
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `name` | string | Yes | `""` | Display name in the command palette |
+| `url` | string | Yes | `""` | URL to open (any valid `https://` or `http://` URL) |
+| `category` | string | No | `"Plugins"` | Palette category for grouping |
+
+<Tip>
+Bookmarks with an empty `name` or empty `url` are silently skipped during palette injection.
+</Tip>
+
+## Examples
+
+### Single Bookmark
+
+```toml
+[[plugins.bookmarks]]
+name = "Spotify"
+url = "https://open.spotify.com"
+category = "Music"
+```
+
+### Multiple Bookmarks Across Categories
+
+```toml
+[[plugins.bookmarks]]
+name = "Spotify"
+url = "https://open.spotify.com"
+category = "Music"
+
+[[plugins.bookmarks]]
+name = "GitHub"
+url = "https://github.com"
+category = "Dev"
+
+[[plugins.bookmarks]]
+name = "Figma"
+url = "https://figma.com"
+category = "Design"
+
+[[plugins.bookmarks]]
+name = "Hacker News"
+url = "https://news.ycombinator.com"
+category = "News"
+```
+
+## Categories
+
+The `category` field controls how the bookmark appears in the command palette. When the palette is open and no search query is active, items are grouped under category headers.
+
+**Common categories include:**
+
+- `"Music"` — streaming and audio services
+- `"Dev"` — development tools and repositories
+- `"Design"` — design and prototyping tools
+- `"Productivity"` — task management and documentation
+- `"News"` — news aggregators and feeds
+
+<Tip>
+If `category` is omitted, the bookmark falls under the default `"Plugins"` category. You can use any string as a category name.
+</Tip>
+
+## How Bookmarks Load
+
+When a user selects a bookmark from the command palette, Jarvis dispatches `Action::OpenURL` with the bookmark's URL. The dispatch handler:
+
+<Steps>
+  <Step title="Normalizes the URL">
+    Auto-prepends `https://` if no scheme is present.
+  </Step>
+
+  <Step title="Saves the current URL">
+    Saves the current URL of the focused pane so Escape can return to it.
+  </Step>
+
+  <Step title="Navigates the webview">
+    Navigates the focused pane's webview to the bookmark URL.
+  </Step>
+</Steps>
+
+The navigation handler permits all `https://` and `http://` URLs, so bookmarks can point to any public website.
+
+## Hot Reload
+
+Edit your `config.toml`, then trigger "Reload Config" from the command palette. Bookmark changes take effect immediately the next time the palette is opened.
+
+<CodeGroup>
+```toml Before
+[[plugins.bookmarks]]
+name = "My App"
+url = "https://example.com"
+```
+
+```toml After
+[[plugins.bookmarks]]
+name = "My App"
+url = "https://app.example.com"
+category = "Productivity"
+```
+</CodeGroup>
+
+## Use Cases
+
+### Web Apps in Your Workflow
+
+Quickly access web applications without leaving Jarvis:
+
+```toml
+[[plugins.bookmarks]]
+name = "Linear"
+url = "https://linear.app"
+category = "Productivity"
+
+[[plugins.bookmarks]]
+name = "Notion"
+url = "https://notion.so"
+category = "Productivity"
+
+[[plugins.bookmarks]]
+name = "Vercel Dashboard"
+url = "https://vercel.com/dashboard"
+category = "Dev"
+```
+
+### Internal Tools
+
+Link to internal company tools or dashboards:
+
+```toml
+[[plugins.bookmarks]]
+name = "Jenkins"
+url = "https://ci.company.internal"
+category = "Dev"
+
+[[plugins.bookmarks]]
+name = "Grafana"
+url = "https://metrics.company.internal"
+category = "Monitoring"
+```
+
+### Quick Reference
+
+Keep documentation and references handy:
+
+```toml
+[[plugins.bookmarks]]
+name = "Rust Docs"
+url = "https://doc.rust-lang.org/std/"
+category = "Reference"
+
+[[plugins.bookmarks]]
+name = "MDN Web Docs"
+url = "https://developer.mozilla.org"
+category = "Reference"
+```
+
+## Troubleshooting
+
+### Bookmark doesn't appear in palette
+
+1. **Check that both `name` and `url` are not empty** — bookmarks with empty fields are skipped.
+2. **Reload config** — open the palette and select "Reload Config".
+3. **Check TOML syntax** — make sure your config file parses correctly.
+
+### Bookmark loads but shows nothing
+
+Some websites prevent embedding in iframes or webviews. This is controlled by the website's `X-Frame-Options` or `Content-Security-Policy` headers. Try:
+
+1. **Opening the URL directly in a browser** to verify it loads.
+2. **Checking the browser console** (if DevTools are enabled) for CSP errors.
+3. **Using a different URL** — some services offer alternative embeddable URLs.
+
+### URL doesn't auto-complete
+
+Bookmarks don't have autocomplete — you must type the full `url` field. If you want to open a URL without a bookmark, use the URL input mode in the command palette (type `>` then the URL).
+
+## Comparison with Local Plugins
+
+| Feature | Bookmark | Local Plugin |
+|---------|----------|-------------|
+| Configuration | `config.toml` | Folder + `plugin.toml` |
+| Files on disk | None | HTML/JS/CSS |
+| IPC bridge | No | Yes |
+| System clipboard | No | Yes (via IPC) |
+| Read files | No | Yes (via IPC) |
+| Custom code | No | Yes |
+| External websites | Yes | Yes |
+| Refresh workflow | Reload config | Cmd+R |
+
+<Tip>
+Start with a bookmark if you just need to open a website. Upgrade to a local plugin when you need custom code or IPC integration.
+</Tip>

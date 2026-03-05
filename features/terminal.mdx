@@ -1,0 +1,257 @@
+---
+title: Terminal Emulator
+description: GPU-accelerated terminal with PTY support and advanced tiling
+---
+
+# Terminal Emulator
+
+Jarvis features a powerful terminal emulator built on **xterm.js 5.5.0** with native PTY support via the `portable-pty` Rust crate. Each terminal pane runs its own isolated shell process with full ANSI/VT sequence support.
+
+## Architecture
+
+The terminal uses a split-process design:
+
+```
+WebView (xterm.js) <--IPC--> Rust Backend (PTY Manager)
+       ↓                            ↓
+   Rendering                    OS PTY + Shell
+```
+
+- **Frontend**: xterm.js handles rendering, scrollback, selection, and ANSI processing
+- **Backend**: `portable-pty` provides cross-platform pseudo-terminal support
+- **Bridge**: JSON-over-IPC connects the two halves bidirectionally
+
+<Note>
+Each terminal pane gets its own dedicated PTY with an isolated shell process and independent scrollback buffer.
+</Note>
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="GPU Acceleration" icon="bolt">
+    Hardware-accelerated rendering via xterm.js canvas for smooth scrolling and high frame rates
+  </Card>
+  
+  <Card title="True Color Support" icon="palette">
+    24-bit color support with configurable themes and Catppuccin Mocha palette
+  </Card>
+  
+  <Card title="Configurable Scrollback" icon="scroll">
+    Up to 100,000 lines of scrollback history per pane
+  </Card>
+  
+  <Card title="Smart Copy/Paste" icon="clipboard">
+    Intelligent clipboard handling with bracketed paste mode support
+  </Card>
+</CardGroup>
+
+## Shell Configuration
+
+Configure your shell in `jarvis.toml`:
+
+```toml
+[shell]
+program = ""                    # Empty = auto-detect
+args = []                       # Extra arguments
+working_directory = "~/code"    # Initial directory
+login_shell = true              # Pass -l on Unix
+
+[shell.env]
+EDITOR = "nvim"                 # Custom environment variables
+RUST_BACKTRACE = "1"
+```
+
+### Shell Auto-Detection
+
+When `program` is empty (default), Jarvis automatically detects your shell:
+
+- **Unix**: Reads `$SHELL`, falls back to `/bin/sh`
+- **Windows**: Reads `$COMSPEC`, falls back to `cmd.exe`
+
+### Environment Sanitization
+
+For security, Jarvis does not inherit the full parent environment. Only safe variables are passed:
+
+```
+HOME, USER, SHELL, PATH, TERM, LANG, DISPLAY,
+WAYLAND_DISPLAY, XDG_RUNTIME_DIR, TMPDIR, etc.
+```
+
+`TERM` is always set to `xterm-256color`.
+
+## Terminal Settings
+
+```toml
+[terminal]
+scrollback_lines = 10000
+cursor_style = "block"          # "block", "underline", or "beam"
+cursor_blink = true
+cursor_blink_interval_ms = 500
+true_color = true
+word_separators = " /\\()\"'-.,:;<>~!@#$%^&*|+=[]{}~?"
+
+[terminal.bell]
+visual = true
+audio = false
+duration_ms = 150
+
+[terminal.mouse]
+copy_on_select = false
+url_detection = true            # Clickable URLs
+click_to_focus = true
+
+[terminal.search]
+wrap_around = true
+regex = false
+case_sensitive = false
+```
+
+### Cursor Styles
+
+<Tabs>
+  <Tab title="Block">
+    Solid rectangular cursor (default)
+    ```toml
+    cursor_style = "block"
+    ```
+  </Tab>
+  
+  <Tab title="Underline">
+    Horizontal line under character
+    ```toml
+    cursor_style = "underline"
+    ```
+  </Tab>
+  
+  <Tab title="Beam">
+    Vertical bar (I-beam) cursor
+    ```toml
+    cursor_style = "beam"
+    ```
+  </Tab>
+</Tabs>
+
+## PTY Lifecycle
+
+### Creation
+
+PTYs are created when:
+
+1. **Terminal Ready**: When xterm.js initializes, it sends `terminal_ready` with dimensions
+2. **Shell Restart**: User clicks "Restart Shell" after process exit
+
+The spawn sequence:
+
+```rust
+native_pty_system()
+  → openpty(cols, rows)
+  → build_shell_command()
+  → spawn_command()
+  → background reader thread
+```
+
+### Resize
+
+Terminals automatically resize when:
+
+- Window is resized
+- Pane layout changes (split/close)
+- Zoom mode is toggled
+
+The `FitAddon` calculates optimal dimensions and sends `pty_resize` via IPC.
+
+### Cleanup
+
+On pane close or app exit:
+
+```
+pane_close → kill_and_remove(pane_id) → destroy_webview
+```
+
+All PTY processes are gracefully killed before shutdown.
+
+## Data Flow
+
+### Input Path (Keystroke to Shell)
+
+```
+User types → xterm.js onData → IPC 'pty_input'
+  → write_all() to PTY → Shell receives input
+```
+
+### Output Path (Shell Output to Screen)
+
+```
+Shell writes → PTY master → reader thread
+  → channel send → poll_pty_output() every 8ms
+  → IPC 'pty_output' → term.write() → Canvas render
+```
+
+### Output Throttling
+
+- Reader thread: 8 KB chunks
+- Max per frame: 64 KB
+- Poll rate: 125 Hz (8ms interval)
+- Effective throughput: ~8 MB/s
+
+## Advanced Features
+
+### Bracketed Paste Mode
+
+When enabled, pasted text is wrapped in escape sequences:
+
+```
+ESC[200~ <pasted text> ESC[201~
+```
+
+This allows shells like zsh/fish to distinguish pasted content from typed input.
+
+### URL Detection
+
+URLs in terminal output are automatically detected and made clickable (when enabled in config):
+
+```toml
+[terminal.mouse]
+url_detection = true
+```
+
+### Copy/Paste Behavior
+
+**Copy (Cmd+C / Ctrl+Shift+C)**:
+1. Check xterm.js selection
+2. Fallback to DOM selection
+3. Send `clipboard_copy` IPC to Rust
+4. System clipboard updated
+
+**Paste (Cmd+V / Ctrl+Shift+V)**:
+1. IPC request `clipboard_paste`
+2. Read system clipboard (text or image)
+3. Insert as PTY input or dispatch paste event
+
+## Multi-Terminal Support
+
+### One PTY per Pane
+
+Every tiling pane hosts an independent terminal:
+
+- Separate shell processes
+- Independent scrollback buffers
+- Per-pane resize tracking
+- Focus-based keyboard routing
+
+### Creating New Terminals
+
+Use keyboard shortcuts or commands:
+
+- **Split Horizontal**: `Cmd+D` (side by side)
+- **Split Vertical**: `Cmd+Shift+D` (top/bottom)
+- **New Pane**: Auto-splits based on current dimensions
+
+Source files:
+- `jarvis-rs/crates/jarvis-app/src/app_state/pty_bridge/`
+- `jarvis-rs/assets/panels/terminal/index.html`
+- `docs/manual/04-terminal.md`
+
+<Note>
+The terminal panel uses xterm.js v5.5.0 and FitAddon v0.10.0, loaded from jsDelivr with SRI verification.
+</Note>

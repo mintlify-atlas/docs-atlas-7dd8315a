@@ -1,0 +1,182 @@
+---
+title: 'Plugin System Overview'
+description: 'Build custom panels, tools, and web apps that run inside Jarvis with full IPC access'
+---
+
+The Jarvis plugin system lets you build custom panels, tools, and web applications that run inside Jarvis with full access to the IPC bridge. Plugins appear in the command palette and load as webview panes — the same mechanism that powers built-in panels like Settings, Chat, and Games.
+
+## Two Plugin Tiers
+
+The plugin system is organized into two tiers, each with different capabilities and complexity:
+
+| Tier | What it is | Where it lives | What it can do |
+|------|-----------|----------------|----------------|
+| **Bookmark** | A named URL | `config.toml` | Opens any website in a Jarvis pane |
+| **Local Plugin** | HTML/JS/CSS folder | `~/.config/jarvis/plugins/` | Full `jarvis://` protocol + IPC bridge |
+
+**Bookmark plugins** are the simplest form: a name, a URL, and an optional category, all declared in your configuration file. They require no files on disk and load any website directly in a Jarvis pane.
+
+**Local plugins** are full HTML/JS/CSS applications that live in a folder on your filesystem. They are served through the `jarvis://` custom protocol, have access to the IPC bridge (`window.jarvis.ipc`), and can communicate bidirectionally with the Rust backend.
+
+Both tiers appear as entries in the command palette. Selecting a plugin navigates the focused pane to the plugin's content. Pressing Escape returns the pane to its previous state.
+
+## Quick Start: Bookmark Plugin
+
+Add this to your `config.toml` (usually `~/.config/jarvis/config.toml`):
+
+```toml
+[[plugins.bookmarks]]
+name = "Spotify"
+url = "https://open.spotify.com"
+category = "Music"
+```
+
+Reload your config (open command palette, select "Reload Config") and the bookmark appears in the palette under the "Music" category.
+
+<Tip>
+You can add as many bookmarks as you want. Each `[[plugins.bookmarks]]` entry creates a new bookmark plugin.
+</Tip>
+
+## Quick Start: Local Plugin
+
+<Steps>
+  <Step title="Create the plugin folder">
+    ```bash
+    mkdir -p ~/.config/jarvis/plugins/hello-world
+    ```
+
+    On Windows: `%APPDATA%\jarvis\plugins\hello-world\`
+  </Step>
+
+  <Step title="Create the manifest">
+    Create `plugin.toml` in the plugin folder:
+
+    ```toml
+    name = "Hello World"
+    category = "Tools"
+    ```
+  </Step>
+
+  <Step title="Create the entry point">
+    Create `index.html` in the plugin folder:
+
+    ```html
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        body {
+          margin: 0;
+          padding: 24px;
+          background: transparent;
+          color: var(--color-text, #cdd6f4);
+          font-family: var(--font-ui, sans-serif);
+        }
+        h1 { color: var(--color-primary, #cba6f7); }
+        button {
+          background: var(--color-primary, #cba6f7);
+          color: var(--color-background, #1e1e2e);
+          border: none;
+          padding: 8px 16px;
+          border-radius: 6px;
+          cursor: pointer;
+        }
+      </style>
+    </head>
+    <body>
+      <h1>Hello from a Jarvis Plugin!</h1>
+      <p>This is running inside the jarvis:// protocol with full IPC access.</p>
+      <button onclick="ping()">Ping Jarvis</button>
+      <p id="result"></p>
+
+      <script>
+        async function ping() {
+          window.jarvis.ipc.send('ping', {});
+          window.jarvis.ipc.on('pong', () => {
+            document.getElementById('result').textContent = 'Pong received!';
+          });
+        }
+      </script>
+    </body>
+    </html>
+    ```
+  </Step>
+
+  <Step title="Load the plugin">
+    Open the command palette and select "Reload Config". Your plugin appears under "Tools". Select "Hello World" and it loads in the focused pane.
+  </Step>
+</Steps>
+
+## Plugin Loading Flow
+
+Understanding the complete loading flow helps when debugging or building more advanced plugins:
+
+```
+1. Jarvis starts (or ReloadConfig is dispatched)
+       ↓
+2. discover_local_plugins() scans ~/.config/jarvis/plugins/
+   - Lists subdirectories
+   - Reads plugin.toml from each
+   - Builds LocalPlugin { id, name, category, entry }
+       ↓
+3. Each plugin dir is registered with the ContentProvider
+       ↓
+4. User opens command palette (Cmd+Shift+P)
+       ↓
+5. inject_plugin_items() creates palette entries:
+   - Bookmarks  → Action::OpenURL("https://...")
+   - Local      → Action::OpenURL("jarvis://localhost/plugins/{id}/{entry}")
+       ↓
+6. User selects a plugin from the palette
+       ↓
+7. dispatch(Action::OpenURL(url))
+   - The focused pane's webview navigates to the URL
+   - The previous URL is saved (so Escape can go back)
+       ↓
+8. WebView requests jarvis://localhost/plugins/my-plugin/index.html
+       ↓
+9. Custom protocol handler → ContentProvider.resolve()
+   - Reads the file from disk
+   - Performs containment check (directory traversal protection)
+   - Returns 200 with correct MIME type
+       ↓
+10. Plugin HTML loads with the IPC bridge already injected
+    (window.jarvis.ipc is available immediately)
+       ↓
+11. User presses Escape → navigates back to the previous page
+```
+
+<Tip>
+The IPC bridge is injected into every webview at creation time, not by the plugin. Your plugin's JavaScript can use `window.jarvis.ipc` without any setup.
+</Tip>
+
+## Development Workflow
+
+The recommended development workflow is:
+
+1. Edit your plugin files (HTML, JS, CSS) in your editor of choice.
+2. Switch to Jarvis and press `Cmd+R` (macOS) or `Ctrl+R` (Windows/Linux) to refresh the webview in-place.
+3. Repeat.
+
+Since plugin files are read from disk on every request, changes take effect immediately without restarting Jarvis. No build step is required.
+
+<Tip>
+If you add, remove, or rename a plugin folder, or change `plugin.toml`, you need to trigger "Reload Config" from the command palette.
+</Tip>
+
+## What's Next?
+
+Explore the plugin system in detail:
+
+<CardGroup cols={2}>
+  <Card title="Bookmark Plugins" icon="bookmark" href="/plugins/bookmark-plugins">
+    Simple URL-based plugins configured in config.toml
+  </Card>
+  <Card title="Local Plugins" icon="folder" href="/plugins/local-plugins">
+    Full HTML/JS/CSS plugins with IPC bridge access
+  </Card>
+  <Card title="IPC Bridge API" icon="code" href="/plugins/ipc-api">
+    Complete reference for communicating with Jarvis
+  </Card>
+</CardGroup>

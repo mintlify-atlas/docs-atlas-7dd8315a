@@ -1,0 +1,329 @@
+---
+title: AI Assistants
+description: Integrated Claude and Gemini AI with streaming responses and tool calling
+---
+
+# AI Assistants
+
+Jarvis provides native integration with **Claude** (Anthropic) and **Gemini** (Google) AI models, with streaming responses, conversation history, and tool calling support.
+
+## Architecture
+
+The AI engine runs on a dedicated Tokio runtime with async message handling:
+
+```
+User input → assistant_task (async)
+  → ClaudeClient/GeminiClient
+  → Streaming SSE chunks
+  → Main thread IPC
+  → WebView updates
+```
+
+<CardGroup cols={2}>
+  <Card title="Claude Integration" icon="robot">
+    Anthropic Claude with OAuth and API key auth, tool calling, and SSE streaming
+  </Card>
+  
+  <Card title="Gemini Integration" icon="sparkles">
+    Google Gemini Flash and Pro models with native streaming support
+  </Card>
+  
+  <Card title="Session Management" icon="history">
+    Conversation history with up to 10 rounds of tool-call loops
+  </Card>
+  
+  <Card title="Token Tracking" icon="chart-line">
+    Automatic input/output token counting and cost tracking
+  </Card>
+</CardGroup>
+
+## Supported Providers
+
+### Claude (Anthropic)
+
+**Authentication Methods:**
+
+<Tabs>
+  <Tab title="API Key">
+    Standard Anthropic API key authentication:
+    ```bash
+    export ANTHROPIC_API_KEY="sk-ant-..."
+    ```
+    
+    Configure in code:
+    ```rust
+    ClaudeConfig {
+        token: env::var("ANTHROPIC_API_KEY")?,
+        auth_method: AuthMethod::ApiKey,
+        model: "claude-sonnet-4-0".into(),
+        ..Default::default()
+    }
+    ```
+  </Tab>
+  
+  <Tab title="OAuth">
+    OAuth bearer token authentication:
+    ```bash
+    export CLAUDE_OAUTH_TOKEN="..."
+    ```
+    
+    Configure in code:
+    ```rust
+    ClaudeConfig {
+        token: env::var("CLAUDE_OAUTH_TOKEN")?,
+        auth_method: AuthMethod::OAuth,
+        model: "claude-sonnet-4-0".into(),
+        ..Default::default()
+    }
+    ```
+  </Tab>
+</Tabs>
+
+**Supported Models:**
+- `claude-sonnet-4-0` (default)
+- `claude-opus-4-0`
+- `claude-3-5-sonnet-20241022`
+- `claude-3-opus-20240229`
+- `claude-3-haiku-20240307`
+
+### Gemini (Google)
+
+**Authentication:**
+
+```bash
+export GOOGLE_API_KEY="AIza..."
+```
+
+**Supported Models:**
+- `gemini-3-flash-preview` (default, fast)
+- `gemini-3.1-pro-preview` (more capable)
+- `gemini-2.0-flash-exp`
+
+**Pricing** (per 1M tokens):
+
+| Model | Input | Output |
+|-------|-------|--------|
+| Flash | $0.50 | $3.00 |
+| Pro   | $2.00 | $12.00 |
+
+## Assistant Panel
+
+### Opening the Assistant
+
+Press `Cmd+Shift+A` (or configure custom keybind) to open the AI assistant overlay.
+
+### System Prompt
+
+The assistant uses a concise system prompt:
+
+```
+You are Jarvis, an AI assistant embedded in a terminal emulator.
+Be concise and helpful. Use plain text, not markdown.
+```
+
+Configure custom prompts in `ClaudeConfig::system_prompt` or `Session::with_system_prompt()`.
+
+### Streaming Responses
+
+Responses stream in real-time via Server-Sent Events (SSE):
+
+```rust
+client.send_message_streaming(
+    &messages,
+    &tools,
+    Box::new(|chunk| {
+        // Update UI with partial text
+        send_assistant_ipc("assistant_chunk", chunk);
+    })
+).await?
+```
+
+## Tool Calling
+
+### Defining Tools
+
+Register tools with JSON Schema parameters:
+
+```rust
+use jarvis_ai::{ToolDefinition, Session};
+
+let tool = ToolDefinition {
+    name: "get_weather".into(),
+    description: "Get current weather for a location".into(),
+    parameters: serde_json::json!({
+        "type": "object",
+        "properties": {
+            "location": {
+                "type": "string",
+                "description": "City name"
+            },
+            "units": {
+                "type": "string",
+                "enum": ["celsius", "fahrenheit"]
+            }
+        },
+        "required": ["location"]
+    }),
+};
+
+let mut session = Session::new(client);
+session.add_tool(tool, Box::new(|args| {
+    // Execute tool and return result
+    Ok(format!("Weather in {}: 72°F", args["location"]))
+}));
+```
+
+### Tool Execution Loop
+
+The session automatically handles multi-turn tool calling:
+
+1. AI returns `tool_use` block
+2. Tool executor callback runs
+3. Result fed back as `tool_result`
+4. AI continues or calls more tools
+5. Max 10 iterations to prevent loops
+
+```rust
+let response = session.chat("What's the weather in SF?").await?;
+// → AI calls get_weather(location="San Francisco")
+// → Executor returns "Weather in San Francisco: 72°F"
+// → AI responds: "It's currently 72°F in San Francisco"
+```
+
+## Session Management
+
+### Creating a Session
+
+```rust
+use jarvis_ai::{ClaudeClient, Session};
+
+let client = ClaudeClient::new(config);
+let mut session = Session::new(client);
+```
+
+### Conversation History
+
+Sessions maintain full message history:
+
+```rust
+session.chat("Hello!").await?;
+session.chat("What's the capital of France?").await?;
+session.chat("What about its population?").await?;
+// Context from all messages preserved
+```
+
+### Resetting Context
+
+```rust
+session.clear_history();
+```
+
+## Token Tracking
+
+### Automatic Counting
+
+```rust
+use jarvis_ai::TokenTracker;
+
+let mut tracker = TokenTracker::new();
+let response = client.send_message(&messages, &tools).await?;
+
+tracker.add(response.usage);
+
+println!("Total input: {}", tracker.total_input());
+println!("Total output: {}", tracker.total_output());
+```
+
+### Cost Estimation
+
+Configure pricing for cost tracking:
+
+```rust
+let pricing = serde_json::json!({
+    "gemini-3-flash-preview": {"input": 0.50, "output": 3.00},
+    "gemini-3.1-pro-preview": {"input": 2.00, "output": 12.00}
+});
+
+let cost = tracker.estimate_cost(&pricing, "gemini-3-flash-preview");
+```
+
+## Skill-Based Routing
+
+The `SkillRouter` dispatches requests to appropriate providers:
+
+```rust
+use jarvis_ai::{SkillRouter, Provider, Skill};
+
+let mut router = SkillRouter::new();
+router.register(Skill::Code, Provider::Claude);
+router.register(Skill::General, Provider::Gemini);
+
+let provider = router.route(Skill::Code);
+// → Provider::Claude
+```
+
+**Available Skills:**
+- `General`: General conversation
+- `Code`: Programming assistance
+- `Research`: Web search and research
+- `Creative`: Content generation
+
+## IPC Protocol
+
+### Messages from Rust → WebView
+
+| Kind | Payload | Description |
+|------|---------|-------------|
+| `assistant_config` | `{model_name}` | Model info on init |
+| `assistant_chunk` | `{text}` | Streaming chunk |
+| `assistant_output` | `{text}` | Complete response |
+| `assistant_error` | `{message}` | Error message |
+
+### Usage Example
+
+```javascript
+// In WebView
+window.jarvis.ipc.on('assistant_chunk', (payload) => {
+    appendText(payload.text);
+});
+
+window.jarvis.ipc.on('assistant_output', (payload) => {
+    markComplete(payload.text);
+});
+```
+
+## Configuration Reference
+
+### Claude Config
+
+```rust
+pub struct ClaudeConfig {
+    pub token: String,
+    pub auth_method: AuthMethod,
+    pub model: String,
+    pub max_tokens: u32,           // Default: 4096
+    pub temperature: Option<f32>,  // 0.0-1.0
+    pub system_prompt: Option<String>,
+}
+```
+
+### Gemini Config
+
+```rust
+pub struct GeminiConfig {
+    pub api_key: String,
+    pub model: String,
+    pub max_tokens: u32,
+    pub temperature: Option<f32>,
+    pub safety_settings: Option<SafetySettings>,
+}
+```
+
+Source files:
+- `jarvis-rs/crates/jarvis-ai/src/`
+- `jarvis-rs/crates/jarvis-app/src/app_state/assistant.rs`
+- `config.py` (Python client configuration)
+
+<Note>
+The assistant task runs on a shared Tokio runtime with 1 worker thread, separate from the main winit event loop.
+</Note>

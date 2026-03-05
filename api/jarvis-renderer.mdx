@@ -1,0 +1,219 @@
+---
+title: 'jarvis-renderer'
+description: 'GPU-accelerated rendering — wgpu-based graphics pipeline with Metal/Vulkan/DirectX support'
+---
+
+## Overview
+
+The `jarvis-renderer` crate provides GPU-accelerated rendering for Jarvis using `wgpu`. It handles all visual elements: terminal text, UI chrome, background effects, visualizer animations, and post-processing effects.
+
+## Public API
+
+### GpuContext
+
+Core GPU context managing the wgpu device, queue, and surface.
+
+```rust
+use jarvis_renderer::GpuContext;
+
+// Initialize GPU context from a winit window
+let gpu = GpuContext::new(window).await;
+```
+
+### RenderState
+
+Main rendering state that orchestrates all render passes.
+
+```rust
+use jarvis_renderer::RenderState;
+
+let render_state = RenderState::new(&gpu);
+```
+
+### QuadRenderer
+
+Efficient batched rendering of textured quads (used for terminal glyphs, UI elements).
+
+```rust
+use jarvis_renderer::{QuadRenderer, QuadInstance};
+
+let mut quad_renderer = QuadRenderer::new(&gpu);
+
+// Add a quad
+let instance = QuadInstance {
+    position: [100.0, 100.0],
+    size: [50.0, 50.0],
+    color: [1.0, 1.0, 1.0, 1.0],
+    tex_coords: [0.0, 0.0, 1.0, 1.0],
+};
+
+quad_renderer.push(instance);
+quad_renderer.render(&gpu);
+```
+
+<ResponseField name="QuadInstance" type="struct">
+  Represents a single textured quad to render.
+  
+  <Expandable title="Fields">
+    <ResponseField name="position" type="[f32; 2]" required>
+      Screen-space position (x, y) in pixels.
+    </ResponseField>
+    
+    <ResponseField name="size" type="[f32; 2]" required>
+      Width and height in pixels.
+    </ResponseField>
+    
+    <ResponseField name="color" type="[f32; 4]" required>
+      RGBA color multiplier (0.0-1.0 per channel).
+    </ResponseField>
+    
+    <ResponseField name="tex_coords" type="[f32; 4]" required>
+      Texture coordinates [u_min, v_min, u_max, v_max].
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### UI Components
+
+#### AssistantPanel
+
+Renders the AI assistant chat interface.
+
+```rust
+use jarvis_renderer::{AssistantPanel, ChatMessage, ChatRole};
+
+let mut panel = AssistantPanel::new();
+panel.add_message(ChatMessage {
+    role: ChatRole::User,
+    content: "Hello!".to_string(),
+});
+```
+
+<ResponseField name="ChatMessage" type="struct">
+  <Expandable title="Fields">
+    <ResponseField name="role" type="ChatRole" required>
+      Who sent the message.
+      
+      Valid values:
+      - `User` — The user
+      - `Assistant` — AI assistant
+      - `System` — System notification
+    </ResponseField>
+    
+    <ResponseField name="content" type="string" required>
+      Message text content.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+#### CommandPalette
+
+Renders the command palette overlay.
+
+```rust
+use jarvis_renderer::{CommandPalette, PaletteItem, PaletteMode};
+
+let mut palette = CommandPalette::new();
+palette.set_mode(PaletteMode::Command);
+
+let item = PaletteItem {
+    label: "New Terminal".to_string(),
+    keybind: Some("Cmd+T".to_string()),
+    category: Some("Panels".to_string()),
+};
+
+palette.add_item(item);
+```
+
+<ResponseField name="PaletteMode" type="enum">
+  Command palette input mode.
+  
+  - `Command` — Command search and execution
+  - `UrlInput` — URL input for webview navigation
+</ResponseField>
+
+#### UiChrome
+
+Renders UI chrome: tab bar, status bar, pane borders.
+
+```rust
+use jarvis_renderer::{
+    UiChrome, TabBar, Tab, StatusBar, PaneBorder
+};
+
+let chrome = UiChrome::new();
+```
+
+<ResponseField name="Tab" type="struct">
+  Represents a tab in the tab bar.
+  
+  <Expandable title="Fields">
+    <ResponseField name="title" type="string" required>
+      Tab title text.
+    </ResponseField>
+    
+    <ResponseField name="active" type="bool" required>
+      Whether this tab is currently focused.
+    </ResponseField>
+    
+    <ResponseField name="icon" type="Option<string>" optional>
+      Optional icon name or emoji.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Performance
+
+#### FrameTimer
+
+Tracks frame timing and FPS.
+
+```rust
+use jarvis_renderer::FrameTimer;
+
+let mut timer = FrameTimer::new();
+timer.start_frame();
+// ... render ...
+timer.end_frame();
+
+println!("FPS: {}", timer.fps());
+```
+
+## Shader Pipeline
+
+Jarvis uses a multi-pass rendering pipeline:
+
+1. **Background Pass** — Render hex grid or solid color
+2. **Content Pass** — Render terminal text and webview content
+3. **UI Pass** — Render tabs, borders, status bar
+4. **Effects Pass** — Apply bloom, scanlines, vignette
+5. **Post-Process Pass** — Final color grading and output
+
+## Platform Support
+
+- **macOS**: Metal backend (recommended)
+- **Windows**: DirectX 12 or Vulkan
+- **Linux**: Vulkan
+
+## Usage Example
+
+```rust
+use jarvis_renderer::{GpuContext, RenderState};
+use winit::window::Window;
+
+#[tokio::main]
+async fn main() {
+    let window = Window::new(&event_loop).unwrap();
+    let gpu = GpuContext::new(&window).await;
+    let mut render_state = RenderState::new(&gpu);
+    
+    loop {
+        render_state.render(&gpu, &window);
+    }
+}
+```
+
+## Related
+
+- [Performance Configuration](/configuration/overview) — GPU quality settings
+- [Effects Configuration](/configuration/overview) — Visual effects control

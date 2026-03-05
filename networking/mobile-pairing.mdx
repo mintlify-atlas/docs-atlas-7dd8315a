@@ -1,0 +1,540 @@
+---
+title: Mobile Device Pairing
+description: QR code pairing and encrypted mobile-to-desktop terminal bridge
+---
+
+Jarvis supports pairing a mobile device (iOS/Android) with a desktop instance to access terminal sessions remotely. The pairing uses QR codes for connection setup and end-to-end encryption for all terminal data.
+
+## Overview
+
+The pairing flow establishes a secure, encrypted WebSocket connection between your mobile device and desktop through a relay server:
+
+```
+Mobile Device <--[encrypted]--> Relay Server <--[encrypted]--> Desktop
+```
+
+All PTY (terminal) data is encrypted with AES-256-GCM before leaving the desktop. The relay server sees only ciphertext.
+
+**Source files:**
+- `jarvis-rs/crates/jarvis-app/src/app_state/ws_server/pairing.rs`
+- `jarvis-mobile/lib/relay-connection.ts`
+- `jarvis-mobile/lib/crypto.ts`
+
+## QR Code Pairing Flow
+
+<Steps>
+  <Step title="Trigger Pairing">
+    On the desktop, trigger the `PairMobile` action from the command palette (or run the command).
+
+    The desktop must have an active relay session. If not, one is created automatically.
+  </Step>
+
+  <Step title="Generate QR Code">
+    A pairing URL is constructed containing:
+    - Relay server WebSocket URL
+    - Session ID (32-character alphanumeric)
+    - Desktop's ECDH public key (SPKI DER, base64, URL-encoded)
+
+    ```
+    jarvis://pair?relay=wss://host/ws&session=abc123&dhpub=MFkw...%3D
+    ```
+  </Step>
+
+  <Step title="Display QR Code">
+    The URL is encoded as a QR code using Unicode half-block characters (upper/lower half blocks for two-row compression) and displayed in the focused terminal pane:
+
+    ```
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+    ██  ██▀▀  ██  ▀▀██  ██▀▀  ██
+    ...
+    ```
+
+    The raw URL is also shown for manual entry.
+  </Step>
+
+  <Step title="Scan with Mobile App">
+    Open the Jarvis mobile app and scan the QR code. The app parses the pairing URL and extracts:
+    - `relay`: Relay server URL
+    - `session`: Session ID
+    - `dhpub`: Desktop's ECDH public key
+  </Step>
+
+  <Step title="Connect to Relay">
+    The mobile app connects to the relay server and sends `mobile_hello` with the session ID.
+
+    The relay responds with `peer_connected` to both sides.
+  </Step>
+
+  <Step title="Key Exchange">
+    Both sides perform ECDH key exchange:
+
+    1. **Desktop** (already has ephemeral ECDH keypair):
+       - Sends `KeyExchange` envelope with DH public key (redundant since it's in the QR code, but handles cases where QR didn't include it)
+
+    2. **Mobile** (generates ephemeral ECDH keypair):
+       - Derives shared secret using desktop's DH public key
+       - Sends `KeyExchange` envelope with its DH public key
+
+    3. **Desktop**:
+       - Derives shared secret using mobile's DH public key
+       - Creates `RelayCipher` with shared AES-256 key
+
+    4. **Both sides** now have the same AES-256-GCM key derived from ECDH
+  </Step>
+
+  <Step title="Encrypted Session">
+    All subsequent messages are wrapped in `Encrypted` envelopes:
+
+    ```json
+    {
+      "type": "encrypted",
+      "iv": "<base64 12-byte IV>",
+      "ct": "<base64 AES-256-GCM ciphertext>"
+    }
+    ```
+
+    The QR code pane is cleared and replaced with a "Mobile paired (encrypted)" confirmation.
+  </Step>
+</Steps>
+
+## Key Exchange Details
+
+### Desktop Side (Rust)
+
+```rust
+// Generate ephemeral ECDH P-256 keypair
+let private_key = SigningKey::random(&mut OsRng);
+let public_key = private_key.verifying_key();
+
+// Export public key as SPKI DER, base64-encoded
+let spki_der = public_key.to_encoded_point(false).as_bytes();
+let dh_pubkey_base64 = base64::encode(spki_der);
+
+// After receiving mobile's public key:
+let shared_secret = ecdh::diffie_hellman(
+    private_key.as_nonzero_scalar(),
+    mobile_pubkey.as_affine()
+);
+
+// Derive AES-256 key: SHA-256(raw_secret_bytes)
+let aes_key = Sha256::digest(shared_secret.raw_secret_bytes());
+```
+
+**Source:** `jarvis-rs/crates/jarvis-platform/src/crypto.rs:419-450`
+
+### Mobile Side (TypeScript)
+
+```typescript
+import { p256 } from '@noble/curves/nist.js';
+import { gcm } from '@noble/ciphers/aes.js';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { getRandomBytes } from 'expo-crypto';
+
+// Generate ephemeral ECDH P-256 private key
+const seed = getRandomBytes(48);
+const privateKey = p256.utils.randomSecretKey(seed);
+
+// Get public key as uncompressed point, wrap in SPKI DER
+const myRawPub = p256.getPublicKey(privateKey, false);
+const mySpki = rawPointToSpki(myRawPub);
+const myPubkeyBase64 = toBase64(mySpki);
+
+// Parse desktop's SPKI DER public key
+const desktopSpki = fromBase64(desktopDhPubkeyBase64);
+const desktopRawPub = spkiToRawPoint(desktopSpki);
+
+// ECDH: compute shared secret (x-coordinate only, 32 bytes)
+const sharedPoint = p256.getSharedSecret(privateKey, desktopRawPub, false);
+const rawSecret = sharedPoint.slice(1, 33);
+
+// SHA-256 hash → AES key
+const aesKey = sha256(rawSecret);
+```
+
+**Source:** `jarvis-mobile/lib/crypto.ts:72-96`
+
+<Info>
+  Both sides compute the same 32-byte AES-256 key by hashing the ECDH shared secret with SHA-256. This matches the Rust implementation.
+</Info>
+
+## Encryption and Decryption
+
+### Encrypt (Mobile)
+
+```typescript
+async function encrypt(plaintext: string): Promise<{ iv: string; ct: string }> {
+  const iv = getRandomBytes(12);
+  const encoded = new TextEncoder().encode(plaintext);
+  const cipher = gcm(aesKey, iv);
+  const ciphertext = cipher.encrypt(encoded);
+  return {
+    iv: toBase64(iv),
+    ct: toBase64(ciphertext),
+  };
+}
+```
+
+### Decrypt (Mobile)
+
+```typescript
+async function decrypt(ivB64: string, ctB64: string): Promise<string> {
+  const iv = fromBase64(ivB64);
+  const ct = fromBase64(ctB64);
+  const cipher = gcm(aesKey, iv);
+  const plaintext = cipher.decrypt(ct);
+  return new TextDecoder().decode(plaintext);
+}
+```
+
+### Encrypt (Desktop)
+
+```rust
+use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
+use aes_gcm::aead::Aead;
+
+let cipher = Aes256Gcm::new(GenericArray::from_slice(&aes_key));
+let nonce = Nonce::from_slice(&rand::random::<[u8; 12]>());
+let ciphertext = cipher.encrypt(nonce, plaintext.as_bytes())?;
+
+// Encode as base64
+let iv_b64 = base64::encode(nonce);
+let ct_b64 = base64::encode(ciphertext);
+```
+
+### Decrypt (Desktop)
+
+```rust
+let cipher = Aes256Gcm::new(GenericArray::from_slice(&aes_key));
+let nonce = Nonce::from_slice(&base64::decode(iv_b64)?);
+let plaintext = cipher.decrypt(nonce, base64::decode(ct_b64)?.as_slice())?;
+```
+
+## Terminal Data Flow
+
+### Output (Desktop → Mobile)
+
+<Steps>
+  <Step title="PTY Output">
+    Terminal output is read from the PTY on the main thread.
+  </Step>
+
+  <Step title="Broadcast">
+    Output is sent to `MobileBroadcaster` (tokio `broadcast::channel`):
+
+    ```rust
+    mobile_tx.send(ServerMessage::PtyOutput {
+        pane_id: 1,
+        data: "hello world\r\n".to_string(),
+    });
+    ```
+  </Step>
+
+  <Step title="Encrypt">
+    Relay client task receives broadcast and encrypts with `RelayCipher`:
+
+    ```rust
+    let (iv, ct) = cipher.encrypt_server_message(&msg)?;
+    let envelope = RelayEnvelope::Encrypted { iv, ct };
+    ```
+  </Step>
+
+  <Step title="Forward">
+    Encrypted envelope is sent to relay server, which forwards to mobile.
+  </Step>
+
+  <Step title="Decrypt and Display">
+    Mobile decrypts and writes to terminal:
+
+    ```typescript
+    const plaintext = await cipher.decrypt(msg.iv, msg.ct);
+    const parsed = JSON.parse(plaintext);
+    if (parsed.type === 'pty_output') {
+      terminal.write(parsed.data);
+    }
+    ```
+  </Step>
+</Steps>
+
+### Input (Mobile → Desktop)
+
+<Steps>
+  <Step title="User Input">
+    User types on the mobile terminal.
+  </Step>
+
+  <Step title="Encrypt">
+    Input is encrypted before sending:
+
+    ```typescript
+    const msg = { type: 'pty_input', pane_id: 1, data: 'ls\r' };
+    const { iv, ct } = await cipher.encrypt(JSON.stringify(msg));
+    ws.send(JSON.stringify({ type: 'encrypted', iv, ct }));
+    ```
+  </Step>
+
+  <Step title="Forward">
+    Relay forwards encrypted envelope to desktop.
+  </Step>
+
+  <Step title="Decrypt">
+    Desktop decrypts and parses:
+
+    ```rust
+    let plaintext = cipher.decrypt_client_message(&iv, &ct)?;
+    let cmd: ClientCommand = serde_json::from_str(&plaintext)?;
+    ```
+  </Step>
+
+  <Step title="Write to PTY">
+    Command is sent to main thread via `std::sync::mpsc` and written to PTY:
+
+    ```rust
+    if let ClientCommand::PtyInput { pane_id, data } = cmd {
+        pty.write_all(data.as_bytes())?;
+    }
+    ```
+  </Step>
+</Steps>
+
+## Pairing Revocation
+
+The `RevokeMobilePairing` action invalidates the current pairing:
+
+<Steps>
+  <Step title="Shutdown Connection">
+    The existing relay client connection is closed.
+  </Step>
+
+  <Step title="Clear State">
+    - `MobileBroadcaster` cleared
+    - Command and event receivers closed
+    - Cipher cleared
+    - Peer-connected flag reset
+  </Step>
+
+  <Step title="Delete Session ID">
+    The persisted session ID file is deleted from disk (`~/.config/jarvis/relay_session_id`).
+  </Step>
+
+  <Step title="Generate New Session">
+    A fresh session ID is generated and the relay client restarts with the new ID.
+  </Step>
+</Steps>
+
+<Info>
+  The old mobile device can no longer connect because the session ID has changed. A new QR code pairing is required.
+</Info>
+
+## Security Considerations
+
+### Ephemeral Keys
+
+Each pairing generates a **new ephemeral ECDH keypair** on both sides. Keys are never persisted and exist only in memory for the duration of the session.
+
+### Forward Secrecy
+
+Because keys are ephemeral, past sessions cannot be decrypted even if a current session key is compromised.
+
+### Downgrade Protection
+
+Once encryption is established:
+- `Plaintext` relay envelopes are rejected
+- `PeerDisconnected` messages from the relay do **not** clear the cipher (prevents relay-initiated downgrade)
+- Cipher is only cleared on explicit revocation or disconnect
+
+**Source:** `docs/manual/09-networking.md:548-553`
+
+### QR Code Security
+
+The QR code contains:
+1. **Relay URL** (public, typically TLS-protected)
+2. **Session ID** (32 chars, 192 bits entropy when random)
+3. **Desktop ECDH public key** (public by design)
+
+The session ID acts as a shared secret for initial pairing. An attacker who captures the QR code could:
+- Join the relay session
+- Perform ECDH key exchange
+- Access the terminal
+
+**Mitigations:**
+- Display QR code only in the terminal (not saved to disk)
+- Clear QR code from screen after successful pairing
+- Use short-lived relay sessions (300s TTL for stale sessions)
+- Revoke pairing when suspicious activity is detected
+
+### Relay Trust
+
+The relay server:
+- Sees only encrypted data (cannot read PTY content)
+- Can drop connections or send fake `peer_disconnected` (handled by downgrade protection)
+- Can log connection metadata (IP addresses, session IDs, connection times)
+- Cannot inject or modify encrypted payloads (AES-GCM provides authentication)
+
+For maximum security, self-host the relay server.
+
+## Mobile App Components
+
+### Terminal UI
+
+`components/CodeTerminal.tsx` renders the terminal using `TerminalWebView` with xterm.js:
+
+```typescript
+import { TerminalWebView } from './TerminalWebView';
+import { RelayConnection } from '../lib/relay-connection';
+
+function CodeTerminal() {
+  const [conn] = useState(() => createRelayConnection('relay'));
+
+  const handleConnect = (pairingData: string) => {
+    conn.connect(pairingData, {
+      onOutput: (data) => terminalRef.current?.write(data),
+      onStatusChange: (status, msg) => setStatus({ status, message: msg }),
+      onError: (error) => console.error(error),
+    });
+  };
+
+  return (
+    <TerminalWebView
+      ref={terminalRef}
+      onData={(data) => conn.sendInput(data)}
+      onResize={(cols, rows) => conn.sendResize(cols, rows)}
+    />
+  );
+}
+```
+
+### Connection Status
+
+```typescript
+type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+
+// Status transitions:
+// disconnected -> connecting (user scans QR)
+// connecting -> connected (encryption established)
+// connected -> connecting (connection lost, auto-reconnect)
+// connecting -> error (fatal error)
+```
+
+### Pane Management
+
+The mobile app supports multiple terminal panes:
+
+```typescript
+interface PaneInfo {
+  id: number;
+  kind: string;  // "terminal" | "skill" | ...
+  title: string;
+}
+
+// Desktop sends pane list:
+{
+  "type": "pane_list",
+  "panes": [
+    { "id": 1, "kind": "terminal", "title": "zsh" },
+    { "id": 2, "kind": "skill", "title": "code-review" }
+  ],
+  "focused_id": 1
+}
+
+// Mobile switches active pane:
+conn.setActivePane(2);
+```
+
+## Configuration
+
+From `jarvis-rs/crates/jarvis-config/src/schema/relay.rs`:
+
+```toml
+[relay]
+url = "wss://jarvis-relay-363598788638.us-central1.run.app/ws"
+auto_connect = false
+```
+
+Set `auto_connect = true` to automatically connect to the relay on startup (desktop will be waiting for mobile to join).
+
+## Troubleshooting
+
+### QR Code Not Scanning
+
+- Ensure adequate lighting and camera focus
+- Try manual URL entry (copy-paste from desktop terminal)
+- Check that the URL is complete (not truncated)
+
+### Connection Timeout
+
+- Verify relay server is reachable from mobile network
+- Check firewall rules (relay typically uses port 8080 or 443)
+- Ensure session ID matches between desktop and mobile
+
+### Encryption Fails
+
+- Verify desktop and mobile are using compatible crypto libraries
+- Check that ECDH public keys are correctly base64-encoded
+- Look for SPKI DER parsing errors in mobile logs
+
+### PTY Output Garbled
+
+- Check terminal size matches (cols/rows)
+- Ensure UTF-8 encoding on both sides
+- Verify ANSI escape sequences are preserved
+
+## Example: Complete Pairing
+
+```rust
+// Desktop (Rust)
+use jarvis_app::actions::Action;
+
+// Trigger pairing
+app.handle_action(Action::PairMobile);
+// QR code displayed in terminal
+
+// Mobile connects, key exchange happens automatically
+
+// Send PTY output to mobile
+if let Some(output) = pty.read() {
+    mobile_tx.send(ServerMessage::PtyOutput {
+        pane_id: 1,
+        data: output,
+    });
+}
+
+// Receive input from mobile
+if let Ok(cmd) = mobile_rx.try_recv() {
+    match cmd {
+        ClientCommand::PtyInput { data, .. } => {
+            pty.write_all(data.as_bytes())?;
+        }
+        ClientCommand::PtyResize { cols, rows, .. } => {
+            pty.resize(cols, rows)?;
+        }
+    }
+}
+```
+
+```typescript
+// Mobile (TypeScript)
+import { RelayConnection } from './lib/relay-connection';
+import { scanQRCode } from './lib/qr-scanner';
+
+// Scan QR code
+const qrData = await scanQRCode();
+// qrData: "jarvis://pair?relay=wss://...&session=...&dhpub=..."
+
+// Connect
+const conn = new RelayConnection();
+conn.connect(qrData, {
+  onOutput: (data) => terminal.write(data),
+  onStatusChange: (status, msg) => {
+    if (status === 'connected') {
+      console.log('Paired and encrypted!');
+    }
+  },
+  onError: (err) => console.error(err),
+});
+
+// Send input
+terminal.onData((data) => conn.sendInput(data));
+
+// Handle resize
+terminal.onResize(({ cols, rows }) => conn.sendResize(cols, rows));
+```

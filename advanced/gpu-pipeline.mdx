@@ -1,0 +1,449 @@
+---
+title: "GPU Rendering Pipeline"
+description: "WebGPU-based rendering with custom shaders and effects"
+---
+
+## Overview
+
+Jarvis uses a fully GPU-accelerated rendering pipeline built on [wgpu](https://wgpu.rs/), the portable Rust graphics API. Every pixel—the animated hex grid background, glowing pane borders, boot animation, CRT scanlines—is rendered through custom WGSL shaders.
+
+<CardGroup cols={2}>
+  <Card title="wgpu-based" icon="microchip">
+    Metal on macOS, Vulkan/DX12 on Windows/Linux
+  </Card>
+  <Card title="Custom Shaders" icon="code">
+    WGSL shaders for backgrounds and effects
+  </Card>
+  <Card title="Instanced Quads" icon="grid">
+    UI chrome rendered as GPU-instanced rectangles
+  </Card>
+  <Card title="VSync" icon="clock">
+    60 FPS with PresentMode::Fifo
+  </Card>
+</CardGroup>
+
+## Pipeline Architecture
+
+The `jarvis-renderer` crate is organized into these modules:
+
+| Module | Purpose |
+|--------|----------|
+| `gpu` | wgpu device, queue, surface, uniform buffers |
+| `background` | Hex grid, gradient, and solid color backgrounds |
+| `effects` | Per-pane glow, dim, and scanline post-processing |
+| `boot_screen` | Full-screen boot animation with surveillance HUD |
+| `quad` | Instanced rectangle drawing for UI chrome |
+| `ui` | Tab bar, status bar, pane border data structures |
+| `render_state` | Orchestrates all pipelines into per-frame rendering |
+| `perf` | Rolling-window FPS timer |
+
+## GPU Context Initialization
+
+### Initialization Sequence
+
+```
+Window → Instance → Surface → Adapter → Device + Queue → Surface Configuration
+```
+
+<Steps>
+  <Step title="Create wgpu Instance">
+    Uses default backends: Metal on macOS, Vulkan/DX12 on Windows, Vulkan on Linux.
+    
+    ```rust
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::all(),
+        ..Default::default()
+    });
+    ```
+  </Step>
+  
+  <Step title="Create Surface">
+    Wraps the winit window handle.
+    
+    ```rust
+    let surface = instance.create_surface(window)?;
+    ```
+  </Step>
+  
+  <Step title="Request Adapter">
+    Prefers `HighPerformance` (discrete GPU). Falls back to integrated or software rendering.
+    
+    ```rust
+    let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::HighPerformance,
+        compatible_surface: Some(&surface),
+        force_fallback_adapter: false,
+    }).await?;
+    ```
+  </Step>
+  
+  <Step title="Request Device">
+    Requests device with default limits.
+    
+    ```rust
+    let (device, queue) = adapter.request_device(
+        &wgpu::DeviceDescriptor {
+            label: Some("jarvis-renderer device"),
+            ..Default::default()
+        },
+        None,
+    ).await?;
+    ```
+  </Step>
+  
+  <Step title="Configure Surface">
+    Sets up double-buffered vsync rendering.
+    
+    ```rust
+    let config = wgpu::SurfaceConfiguration {
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        format: surface.get_capabilities(&adapter).formats[0],
+        width: size.width,
+        height: size.height,
+        present_mode: wgpu::PresentMode::Fifo, // vsync
+        desired_maximum_frame_latency: 2,
+        alpha_mode: wgpu::CompositeAlphaMode::Auto,
+        view_formats: vec![],
+    };
+    surface.configure(&device, &config);
+    ```
+  </Step>
+</Steps>
+
+## Rendering Pipeline
+
+### Per-Frame Render Order
+
+Each frame follows a two-pass pipeline:
+
+<Steps>
+  <Step title="Pass 1: Background">
+    Clear surface and run background shader (hex grid or gradient) as a full-screen triangle.
+    
+    ```rust
+    let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("Background Pass"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view: &view,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(clear_color),
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        depth_stencil_attachment: None,
+        ..Default::default()
+    });
+    
+    render_pass.set_pipeline(&background_pipeline);
+    render_pass.draw(0..3, 0..1); // full-screen triangle
+    ```
+  </Step>
+  
+  <Step title="Pass 2: UI Chrome">
+    Overlay tab bar, status bar, and pane borders via instanced quad drawing.
+    
+    ```rust
+    let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("UI Chrome Pass"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view: &view,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Load, // preserve background
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        ..Default::default()
+    });
+    
+    render_pass.set_pipeline(&quad_pipeline);
+    render_pass.set_vertex_buffer(0, instance_buffer.slice(..));
+    render_pass.draw(0..6, 0..instance_count); // instanced quads
+    ```
+  </Step>
+</Steps>
+
+## Background Modes
+
+Five background modes are supported:
+
+<Tabs>
+  <Tab title="hex_grid">
+    Animated hexagonal grid with parallax scrolling.
+    
+    ```toml
+    [background]
+    mode = "hex_grid"
+    hex_size = 32.0
+    hex_spacing = 8.0
+    hex_color = "#8b5cf6"
+    hex_opacity = 0.15
+    scroll_speed = 0.5
+    ```
+    
+    **Shader**: `jarvis-rs/crates/jarvis-renderer/src/shaders/hex_grid.wgsl`
+  </Tab>
+  
+  <Tab title="solid">
+    Flat color background.
+    
+    ```toml
+    [background]
+    mode = "solid"
+    color = "#1a1a1a"
+    ```
+  </Tab>
+  
+  <Tab title="gradient">
+    Two-color linear gradient.
+    
+    ```toml
+    [background]
+    mode = "gradient"
+    top_color = "#2d1b4e"
+    bottom_color = "#0f0f0f"
+    angle = 135.0
+    ```
+  </Tab>
+  
+  <Tab title="image">
+    Static image (PNG/JPEG).
+    
+    ```toml
+    [background]
+    mode = "image"
+    path = "~/Pictures/wallpaper.png"
+    blur = 0.0
+    opacity = 1.0
+    ```
+  </Tab>
+  
+  <Tab title="video">
+    Looping video (MP4/WebM).
+    
+    ```toml
+    [background]
+    mode = "video"
+    path = "~/Videos/background.mp4"
+    volume = 0.0
+    ```
+  </Tab>
+</Tabs>
+
+## Visual Effects
+
+Effects are applied per-pane and stacked in this order:
+
+<AccordionGroup>
+  <Accordion title="Glow" icon="lightbulb">
+    Outer glow around focused pane.
+    
+    ```toml
+    [effects.glow]
+    enabled = true
+    color = "#8b5cf6"
+    radius = 8.0
+    intensity = 0.8
+    ```
+    
+    Renders a blurred quad behind the pane border.
+  </Accordion>
+  
+  <Accordion title="Dim" icon="moon">
+    Darkens unfocused panes.
+    
+    ```toml
+    [effects.dim]
+    enabled = true
+    opacity = 0.6
+    ```
+    
+    Overlays a semi-transparent black quad.
+  </Accordion>
+  
+  <Accordion title="Scanlines" icon="tv">
+    CRT-style horizontal scanlines.
+    
+    ```toml
+    [effects.scanlines]
+    enabled = true
+    spacing = 2.0
+    intensity = 0.3
+    ```
+    
+    Shader draws alternating transparent/dark horizontal lines.
+  </Accordion>
+  
+  <Accordion title="Vignette" icon="circle">
+    Darkens screen edges.
+    
+    ```toml
+    [effects.vignette]
+    enabled = true
+    intensity = 0.5
+    radius = 0.8
+    ```
+    
+    Applied in the background shader pass.
+  </Accordion>
+  
+  <Accordion title="Bloom" icon="sparkles">
+    Light bleed effect on bright areas.
+    
+    ```toml
+    [effects.bloom]
+    enabled = false
+    threshold = 0.8
+    intensity = 0.5
+    ```
+    
+    <Warning>Bloom requires additional render passes and impacts performance.</Warning>
+  </Accordion>
+</AccordionGroup>
+
+## Boot Animation
+
+The boot sequence runs a three-pass pipeline:
+
+<Steps>
+  <Step title="Boot Shader Pass">
+    Full-screen surveillance HUD with scan line, corner brackets, and vignette.
+    
+    **Shader**: `jarvis-rs/crates/jarvis-renderer/src/shaders/boot.wgsl`
+  </Step>
+  
+  <Step title="Boot Quad Pass">
+    Progress bar track and fill rectangles.
+  </Step>
+  
+  <Step title="Boot Text Pass">
+    Title ("J A R V I S"), cycling status messages, percentage counter.
+    
+    Rendered with `glyphon` text engine.
+  </Step>
+</Steps>
+
+### Boot Sequence Timeline
+
+```
+0ms   - Show title + corner brackets
+500ms - "Initializing systems..."
+1000ms - Progress bar appears
+1500ms - "Loading configuration..."
+2000ms - "Starting renderer..." (50% progress)
+2500ms - "Connecting services..." (75% progress)
+3000ms - "System ready" (100% progress)
+3500ms - Fade to main UI
+```
+
+## Quad Renderer
+
+UI chrome (borders, bars) is drawn using instanced quads:
+
+```rust
+pub struct QuadInstance {
+    pub position: [f32; 2],  // top-left corner
+    pub size: [f32; 2],      // width, height
+    pub color: [f32; 4],     // RGBA
+    pub border_radius: f32,  // corner rounding
+}
+```
+
+One draw call renders all quads:
+
+```rust
+render_pass.set_vertex_buffer(0, instance_buffer.slice(..));
+render_pass.draw(0..6, 0..instance_count); // 6 vertices, N instances
+```
+
+<Tip>
+Instancing allows drawing thousands of rectangles in a single GPU call.
+</Tip>
+
+## Performance Presets
+
+```toml
+[performance]
+preset = "balanced"  # "low", "balanced", "high", "ultra"
+vsync = true
+target_fps = 60
+```
+
+| Preset | Effects | Shadows | Blur | Target FPS |
+|--------|---------|---------|------|------------|
+| Low | Disabled | Disabled | Disabled | 30 |
+| Balanced | Glow only | Disabled | 2px | 60 |
+| High | All except bloom | Enabled | 4px | 60 |
+| Ultra | All | Enabled | 8px | 120 |
+
+## Frame Timing
+
+The `FrameTimer` tracks rolling-window FPS:
+
+```rust
+pub struct FrameTimer {
+    frame_times: VecDeque<Instant>,
+    window_size: usize,
+}
+
+impl FrameTimer {
+    pub fn tick(&mut self) {
+        self.frame_times.push_back(Instant::now());
+        if self.frame_times.len() > self.window_size {
+            self.frame_times.pop_front();
+        }
+    }
+    
+    pub fn fps(&self) -> f64 {
+        if self.frame_times.len() < 2 { return 0.0; }
+        let elapsed = self.frame_times.back().unwrap()
+            .duration_since(*self.frame_times.front().unwrap());
+        (self.frame_times.len() - 1) as f64 / elapsed.as_secs_f64()
+    }
+}
+```
+
+## Color Management
+
+All colors are stored as linear RGB internally and converted to sRGB for rendering:
+
+```rust
+fn linear_to_srgb(linear: f32) -> f32 {
+    if linear <= 0.0031308 {
+        linear * 12.92
+    } else {
+        1.055 * linear.powf(1.0 / 2.4) - 0.055
+    }
+}
+```
+
+<Info>
+The surface format is typically `Bgra8UnormSrgb`, which applies automatic sRGB conversion.
+</Info>
+
+## Shader Reference
+
+<CardGroup cols={2}>
+  <Card title="hex_grid.wgsl" icon="honeycomb">
+    Animated hexagonal background with parallax
+  </Card>
+  <Card title="gradient.wgsl" icon="palette">
+    Two-color linear gradient
+  </Card>
+  <Card title="boot.wgsl" icon="rocket">
+    Surveillance HUD boot animation
+  </Card>
+  <Card title="quad.wgsl" icon="square">
+    Instanced rectangle rendering
+  </Card>
+</CardGroup>
+
+## Source References
+
+- `jarvis-rs/crates/jarvis-renderer/src/render_state/state.rs` - Frame orchestration
+- `jarvis-rs/crates/jarvis-renderer/src/gpu.rs` - GPU context
+- `jarvis-rs/crates/jarvis-renderer/src/background/` - Background modes
+- `jarvis-rs/crates/jarvis-renderer/src/effects/` - Visual effects
+- `jarvis-rs/crates/jarvis-renderer/src/shaders/` - WGSL shaders
+- `docs/manual/10-renderer.md` - Complete reference

@@ -1,97 +1,67 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Welcome to Jarvis"
+description: "A GPU-accelerated desktop environment with multiplayer AI assistants, arcade games, live chat, and voice input"
 ---
 
-## Setting up
+## What is Jarvis?
 
-Get your documentation site up and running in minutes.
+Jarvis is a shared desktop environment where multiple AI assistants, retro arcade games, live chat, and a GPU-rendered interface all coexist on one screen. Connect with friends, play Asteroids or Tetris, talk to Claude Opus assistants, and vibe — all at once.
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Get Jarvis running in under 5 minutes
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Installation" icon="download" href="/installation">
+    Complete setup guide for macOS
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="AI Assistants" icon="brain" href="/features/ai-assistants">
+    Run up to 4 Claude Opus panels simultaneously
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Arcade Games" icon="gamepad" href="/features/arcade-games">
+    Embedded games: Asteroids, Tetris, Minesweeper, and more
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## Core Features
 
-Everything you need to create world-class documentation.
+Everything you need for a multiplayer vibe coding experience.
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
+<CardGroup cols={3}>
+  <Card title="GPU-Accelerated Terminal" icon="terminal" href="/features/terminal">
+    WebGPU rendering with tiling window manager
   </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
+  <Card title="Multiplayer Chat" icon="messages" href="/features/multiplayer">
+    Real-time presence with invite codes and room sharing
   </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
+  <Card title="Voice Input" icon="microphone" href="/features/voice-input">
+    Push-to-talk with local Whisper transcription
   </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
+  <Card title="Plugin System" icon="plug" href="/plugins/overview">
+    Custom panels and tools with IPC bridge
   </Card>
-</Columns>
+  <Card title="Live Configuration" icon="sliders" href="/configuration/overview">
+    Hot-reload themes, colors, and keybindings
+  </Card>
+  <Card title="Mobile Pairing" icon="mobile" href="/networking/mobile-pairing">
+    Connect via Expo app with QR codes
+  </Card>
+</CardGroup>
 
-## Need inspiration?
+## Architecture
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+Jarvis is built with Rust, WebGPU, and Python AI integration.
+
+<CardGroup cols={2}>
+  <Card title="System Overview" icon="diagram-project" href="/architecture/overview">
+    Crate structure and design patterns
+  </Card>
+  <Card title="Rendering Pipeline" icon="paintbrush" href="/architecture/renderer">
+    GPU pipeline, shaders, and visual effects
+  </Card>
+  <Card title="Tiling System" icon="grid" href="/architecture/tiling-system">
+    Binary split tree window management
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/jarvis-app">
+    Full Rust crate documentation
+  </Card>
+</CardGroup>

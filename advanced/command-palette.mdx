@@ -1,0 +1,266 @@
+---
+title: "Command Palette"
+description: "Searchable action picker with fuzzy filtering"
+---
+
+## Overview
+
+The command palette is a searchable overlay that exposes every action in Jarvis. Press `Cmd+P` (or your configured keybind) to open it, type to filter, and press Enter to execute.
+
+<CardGroup cols={2}>
+  <Card title="Fuzzy Search" icon="magnifying-glass">
+    Type partial matches to filter actions
+  </Card>
+  <Card title="Categorized" icon="folder-tree">
+    Actions grouped by category (Panes, Window, Apps, etc.)
+  </Card>
+  <Card title="Dynamic Items" icon="sparkles">
+    Plugins and games automatically added
+  </Card>
+  <Card title="Keyboard Navigation" icon="keyboard">
+    Arrow keys, Enter, and Escape
+  </Card>
+</CardGroup>
+
+## Input Modes
+
+The input system maintains an `InputMode` that determines how key events are routed:
+
+| Mode | Description |
+|------|-------------|
+| `Terminal` | Default. Keybinds checked first; unmatched keys sent to PTY |
+| `CommandPalette` | Palette open. All keys routed to filter/selection handler |
+| `Assistant` | AI assistant panel open. Keys routed to text input |
+| `Settings` | Settings UI open. Keys consumed (not forwarded to terminal) |
+
+<Info>
+Opening the command palette sets mode to `CommandPalette` until dismissed.
+</Info>
+
+## Palette Categories
+
+Actions are organized into 7 categories:
+
+<AccordionGroup>
+  <Accordion title="Panes" icon="window-restore">
+    - New Pane
+    - Close Pane
+    - Split Horizontal / Vertical
+    - Focus Pane (1-5)
+    - Focus Next/Previous
+    - Zoom Pane
+    - Resize Pane
+    - Swap Pane
+  </Accordion>
+  
+  <Accordion title="Window" icon="window-maximize">
+    - Toggle Fullscreen
+    - Quit
+  </Accordion>
+  
+  <Accordion title="Apps" icon="grid">
+    - Command Palette
+    - Settings
+    - Chat
+    - Assistant
+    - Close Overlay
+  </Accordion>
+  
+  <Accordion title="Terminal" icon="terminal">
+    - Scroll Up/Down
+    - Scroll to Top/Bottom
+    - Copy / Paste / Select All
+    - Find (Open/Close/Next/Previous)
+    - Clear Terminal
+  </Accordion>
+  
+  <Accordion title="Games" icon="gamepad">
+    - Asteroids
+    - Tetris
+    - Minesweeper
+    - Pinball
+    - Doodle Jump
+    - Subway Surfers
+    - Kart Bros
+    - Basket Bros
+  </Accordion>
+  
+  <Accordion title="Web" icon="globe">
+    - Open URL (dynamic prompt)
+  </Accordion>
+  
+  <Accordion title="System" icon="gear">
+    - Pair Mobile Device
+    - Revoke Mobile Pairing
+    - Reload Config
+    - Push to Talk
+  </Accordion>
+</AccordionGroup>
+
+## Action Enum
+
+Every user-triggerable operation is represented by an `Action` variant. Here are key examples:
+
+```rust
+pub enum Action {
+    NewPane,
+    ClosePane,
+    SplitHorizontal,
+    SplitVertical,
+    FocusPane(usize),
+    FocusNextPane,
+    FocusPrevPane,
+    ZoomPane,
+    ResizePane { direction: Direction, delta: i32 },
+    SwapPane(Direction),
+    ToggleFullscreen,
+    Quit,
+    OpenCommandPalette,
+    OpenSettings,
+    OpenChat,
+    OpenAssistant,
+    CloseOverlay,
+    LaunchGame(String),
+    OpenURL(String),
+    PairMobile,
+    RevokeMobilePairing,
+    ReloadConfig,
+    Copy,
+    Paste,
+    SelectAll,
+    ScrollUp(u32),
+    ScrollDown(u32),
+    ScrollToTop,
+    ScrollToBottom,
+    ClearTerminal,
+    PushToTalk,
+    ReleasePushToTalk,
+    None,
+}
+```
+
+<Tip>
+Source: `jarvis-rs/crates/jarvis-common/src/actions/action_enum.rs`
+</Tip>
+
+## Default Keybinds
+
+These are the built-in keyboard shortcuts:
+
+| Keybind | Action | Description |
+|---------|--------|-------------|
+| `Cmd+P` | OpenCommandPalette | Open command palette |
+| `Cmd+Shift+P` | OpenSettings | Open settings panel |
+| `Cmd+T` | NewPane | Create new terminal pane |
+| `Cmd+W` | ClosePane | Close current pane |
+| `Cmd+D` | SplitHorizontal | Split pane side-by-side |
+| `Cmd+Shift+D` | SplitVertical | Split pane top-bottom |
+| `Cmd+1` through `Cmd+5` | FocusPane(n) | Focus pane by number |
+| `Cmd+[` | FocusPrevPane | Cycle focus left |
+| `Cmd+]` | FocusNextPane | Cycle focus right |
+| `Cmd+Shift+F` | ToggleFullscreen | Toggle fullscreen |
+| `Cmd+Q` | Quit | Quit application |
+| `Cmd+C` | Copy | Copy selection |
+| `Cmd+V` | Paste | Paste from clipboard |
+| `Cmd+A` | SelectAll | Select all text |
+| `Cmd+K` | ClearTerminal | Clear scrollback |
+| `Cmd+F` | SearchOpen | Open find bar |
+| `Cmd+/` | OpenChat | Open chat panel |
+| `Cmd+Shift+A` | OpenAssistant | Toggle AI assistant |
+| `Left Control` | PushToTalk | Voice input (hold) |
+
+<Info>
+All keybinds are customizable in `config.toml`. See [Configuration: Keybindings](/configuration/keybindings) for details.
+</Info>
+
+## Palette Implementation
+
+### Rendering
+
+The palette is rendered by `CommandPalette` in the `jarvis-renderer` crate:
+
+```rust
+pub struct CommandPalette {
+    pub items: Vec<PaletteItem>,
+    pub selected_index: usize,
+    pub filter: String,
+    pub mode: PaletteMode,
+}
+
+pub struct PaletteItem {
+    pub label: String,
+    pub action: Action,
+    pub category: String,
+    pub icon: Option<String>,
+}
+
+pub enum PaletteMode {
+    Command,   // Default: show all actions
+    URLPrompt, // User typing a URL to open
+}
+```
+
+### Filtering
+
+Fuzzy matching is case-insensitive and matches partial strings:
+
+```rust
+let filtered: Vec<&PaletteItem> = items.iter()
+    .filter(|item| item.label.to_lowercase().contains(&filter.to_lowercase()))
+    .collect();
+```
+
+### Keyboard Navigation
+
+When `InputMode::CommandPalette` is active:
+
+- **Up/Down Arrow**: Change `selected_index`
+- **Enter**: Dispatch the selected action
+- **Escape**: Close palette and return to `Terminal` mode
+- **Any other key**: Append to `filter` string
+
+### IPC Integration
+
+The palette communicates with WebViews via IPC:
+
+**Rust → JavaScript**:
+```json
+{
+  "kind": "palette_show",
+  "payload": {
+    "items": [
+      { "label": "New Pane", "category": "Panes", "icon": "plus" },
+      { "label": "Split Horizontal", "category": "Panes", "icon": "columns" }
+    ],
+    "selected": 0
+  }
+}
+```
+
+**JavaScript → Rust**:
+```json
+{ "kind": "palette_click", "payload": { "index": 3 } }
+{ "kind": "palette_hover", "payload": { "index": 1 } }
+{ "kind": "palette_dismiss", "payload": {} }
+```
+
+## Adding Custom Actions
+
+Plugins can add items to the palette by declaring actions in `plugin.toml`:
+
+```toml
+[[actions]]
+label = "Open Dashboard"
+category = "Web"
+icon = "chart-line"
+url = "https://example.com/dashboard"
+```
+
+These are automatically registered when the plugin loads.
+
+## Source References
+
+- `jarvis-rs/crates/jarvis-renderer/src/command_palette.rs` - Palette state
+- `jarvis-rs/crates/jarvis-platform/src/input_processor/` - Input routing
+- `jarvis-rs/crates/jarvis-common/src/actions/` - Action enum
+- `docs/manual/07-input-palette.md` - Complete reference

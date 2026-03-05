@@ -1,0 +1,85 @@
+---
+title: 'jarvis-app'
+description: 'Core application crate — main entry point and application state management'
+---
+
+## Overview
+
+The `jarvis-app` crate is the main application orchestrator for Jarvis. It initializes the window, manages application state, handles events, and coordinates between all subsystems (renderer, tiling, AI, webview, etc.).
+
+## CLI Interface
+
+Jarvis accepts command-line arguments for customization and debugging.
+
+### Command-Line Arguments
+
+<ParamField path="-e, --execute" type="string" optional>
+  Execute a command instead of the default shell.
+  
+  Example:
+  ```bash
+  jarvis --execute "htop"
+  ```
+</ParamField>
+
+<ParamField path="-d, --directory" type="string" optional>
+  Working directory to start in.
+  
+  Example:
+  ```bash
+  jarvis --directory ~/projects/my-app
+  ```
+</ParamField>
+
+<ParamField path="--config" type="string" optional>
+  Config file path override. By default, Jarvis loads from the OS config directory.
+  
+  Example:
+  ```bash
+  jarvis --config ~/.jarvis-custom.toml
+  ```
+</ParamField>
+
+<ParamField path="--log-level" type="string" optional>
+  Log level override. Valid values: `debug`, `info`, `warn`, `error`.
+  
+  Example:
+  ```bash
+  jarvis --log-level debug
+  ```
+</ParamField>
+
+## Usage
+
+```rust
+use jarvis_app::cli;
+
+fn main() {
+    let args = cli::parse();
+    
+    if let Some(cmd) = args.execute {
+        println!("Executing: {}", cmd);
+    }
+    
+    if let Some(dir) = args.directory {
+        println!("Starting in: {}", dir);
+    }
+}
+```
+
+## Architecture
+
+The application uses a modular architecture:
+
+- **App State**: Central state machine tracking assistant mode, panels, menus
+- **Event Handler**: Processes window events, keyboard input, IPC messages
+- **Dispatch**: Routes commands to appropriate subsystems
+- **Assistant Task**: Manages AI conversation loop and tool execution
+
+## Related Crates
+
+- [`jarvis-tiling`](/api/jarvis-tiling) — Window management and pane layout
+- [`jarvis-renderer`](/api/jarvis-renderer) — GPU rendering pipeline
+- [`jarvis-ai`](/api/jarvis-ai) — AI client and session management
+- [`jarvis-webview`](/api/jarvis-webview) — Embedded web content
+- [`jarvis-config`](/api/jarvis-config) — Configuration system

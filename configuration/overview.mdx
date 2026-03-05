@@ -1,0 +1,313 @@
+---
+title: Configuration Overview
+description: Learn how to configure Jarvis using TOML with sensible defaults, theme support, and live reload
+---
+
+## Introduction
+
+Jarvis uses a single **TOML configuration file** with sensible defaults for every field. You only need to override the values you want to change—missing fields are automatically filled with their defaults.
+
+<Info>
+The configuration schema version is **1** (`CONFIG_SCHEMA_VERSION = 1`).
+</Info>
+
+## Config File Location
+
+Jarvis resolves its configuration file using the platform's standard config directory under the `jarvis/` subfolder:
+
+| Platform | Path |
+|----------|------|
+| **macOS** | `~/Library/Application Support/jarvis/config.toml` |
+| **Linux** | `~/.config/jarvis/config.toml` |
+| **Windows** | `C:\Users\<USER>\AppData\Roaming\jarvis\config.toml` |
+
+<Note>
+If the file does not exist when Jarvis starts, it creates a default `config.toml` populated with commented-out documentation for every section.
+</Note>
+
+## How Configuration Loading Works
+
+The configuration system follows a four-step process:
+
+<Steps>
+  <Step title="Load TOML">
+    The `config.toml` file is read and deserialized. All fields use `#[serde(default)]`, so a partial config (or even an empty file) works correctly.
+  </Step>
+  
+  <Step title="Apply theme">
+    If `theme.name` is anything other than `"jarvis-dark"`, the theme file is located and its overrides are merged into the config.
+  </Step>
+  
+  <Step title="Discover plugins">
+    The `~/.config/jarvis/plugins/` directory is scanned for local plugin folders containing a `plugin.toml` manifest.
+  </Step>
+  
+  <Step title="Validate">
+    All numeric ranges, keybind uniqueness, and other constraints are checked. If validation fails, an error is returned.
+  </Step>
+</Steps>
+
+## Minimal Configuration Example
+
+An empty file or just a theme selection is valid:
+
+```toml config.toml
+# Minimal config - everything uses defaults
+[theme]
+name = "dracula"
+```
+
+## Complete Configuration Sections
+
+The configuration file is organized into the following sections:
+
+<CardGroup cols={2}>
+  <Card title="Theme" icon="palette" href="/configuration/themes">
+    Color schemes and visual customization
+  </Card>
+  
+  <Card title="Colors" icon="swatchbook">
+    Full color palette with Catppuccin Mocha defaults
+  </Card>
+  
+  <Card title="Font" icon="font">
+    Typography for terminal/code and UI elements
+  </Card>
+  
+  <Card title="Terminal" icon="terminal">
+    Terminal emulator settings: scrollback, cursor, bell, mouse
+  </Card>
+  
+  <Card title="Shell" icon="command">
+    Shell process configuration
+  </Card>
+  
+  <Card title="Window" icon="window-maximize">
+    Window appearance and behavior
+  </Card>
+  
+  <Card title="Layout" icon="table-cells" href="/configuration/tiling">
+    Panel layout geometry and tiling
+  </Card>
+  
+  <Card title="Opacity" icon="droplet">
+    Transparency settings for all UI layers
+  </Card>
+  
+  <Card title="Background" icon="image">
+    Background display modes (hex grid, solid, image, video, gradient)
+  </Card>
+  
+  <Card title="Effects" icon="wand-magic-sparkles">
+    Visual effects: scanlines, vignette, bloom, glow, flicker
+  </Card>
+  
+  <Card title="Visualizer" icon="circle-dot">
+    Central visualizer system (orb, particle, waveform)
+  </Card>
+  
+  <Card title="Keybinds" icon="keyboard" href="/configuration/keybindings">
+    Keyboard shortcuts
+  </Card>
+</CardGroup>
+
+## Hot Reload
+
+Jarvis supports **live configuration reloading**—you can edit `config.toml` while Jarvis is running and changes will take effect automatically.
+
+### How It Works
+
+<Accordion title="Reload System Architecture">
+  The reload system has three layers:
+
+  1. **ConfigWatcher** — Uses the `notify` crate to watch the config file's parent directory for filesystem events (`Modify` and `Create` events). It filters events to only react to changes affecting the actual config file by matching the filename.
+
+  2. **Debouncing** — When a change is detected, the watcher enters a 500ms debounce window. Any additional filesystem events during this window are coalesced into a single reload. This prevents rapid reloads when editors perform atomic saves (write to temp file + rename).
+
+  3. **ReloadManager** — Listens for change signals from the watcher, then:
+     - Re-reads and parses the TOML file
+     - Applies the selected theme (if not `jarvis-dark`)
+     - Validates the new configuration
+     - Publishes the new config via a `tokio::sync::watch` channel
+
+  If the reload fails (parse error, validation error), the failure is logged as a warning and the previous valid config remains in effect.
+</Accordion>
+
+### What Triggers a Reload
+
+- Saving the config file in any text editor
+- Replacing the file via copy/rename
+- Any `Modify` or `Create` filesystem event on the config file
+
+<Warning>
+Changes are debounced with a **500ms window**. If the watcher receives multiple change signals within 500ms, they are collapsed into one reload event.
+</Warning>
+
+## Config Validation Rules
+
+After loading and theme application, the config is validated against constraints. If any fail, Jarvis returns a `ConfigError::ValidationError` with all violations.
+
+### Common Validation Rules
+
+<ParamField path="font.size" type="u32" default={13}>
+  Valid range: **8–32**
+</ParamField>
+
+<ParamField path="layout.panel_gap" type="u32" default={6}>
+  Valid range: **1–20** pixels
+</ParamField>
+
+<ParamField path="layout.max_panels" type="u32" default={5}>
+  Valid range: **1–10** panels
+</ParamField>
+
+<ParamField path="opacity.*" type="f64" default="varies">
+  All opacity fields: **0.0–1.0**
+</ParamField>
+
+<ParamField path="keybinds.*" type="string">
+  **No duplicate bindings** — Each key combination must be unique
+</ParamField>
+
+## Example Configurations
+
+<CodeGroup>
+
+```toml Developer Setup
+[theme]
+name = "tokyo-night"
+
+[font]
+family = "JetBrains Mono"
+size = 14
+ligatures = true
+
+[terminal]
+scrollback_lines = 50000
+cursor_style = "beam"
+
+[terminal.mouse]
+copy_on_select = true
+
+[window]
+decorations = "transparent"
+opacity = 0.95
+blur = true
+
+[startup.boot_animation]
+enabled = false
+
+[[auto_open.panels]]
+kind = "terminal"
+command = "claude"
+title = "Claude Code"
+
+[[auto_open.panels]]
+kind = "terminal"
+title = "Terminal"
+```
+
+```toml Performance-Conscious
+[performance]
+preset = "low"
+frame_rate = 30
+orb_quality = "low"
+bloom_passes = 1
+
+[effects]
+enabled = false
+
+[visualizer]
+enabled = false
+
+[background]
+mode = "solid"
+solid_color = "#000000"
+
+[startup.boot_animation]
+enabled = false
+
+[startup.fast_start]
+enabled = true
+delay = 0.1
+```
+
+```toml Streamer Setup
+[colors]
+primary = "#ff6b6b"
+secondary = "#4ecdc4"
+
+[effects]
+blur_radius = 20
+saturate = 1.3
+
+[effects.bloom]
+intensity = 1.5
+passes = 3
+
+[effects.glow]
+color = "#ff6b6b"
+width = 3.0
+intensity = 0.4
+
+[visualizer]
+type = "particle"
+scale = 1.5
+
+[visualizer.particle]
+style = "fire"
+count = 2000
+color = "#ff6b6b"
+
+[livechat]
+enabled = true
+
+[window]
+startup_mode = "fullscreen"
+```
+
+</CodeGroup>
+
+## Config API Reference
+
+### Loading Configuration
+
+```rust
+use jarvis_config::{load_config, config_to_json};
+
+let config = load_config().expect("failed to load config");
+let json = config_to_json(&config);
+println!("{json}");
+```
+
+### Saving Configuration
+
+```rust
+use jarvis_config::{save_config, save_config_to_path};
+
+// Save to default platform path
+save_config(&config)?;
+
+// Save to custom path
+save_config_to_path(&config, "/path/to/config.toml")?;
+```
+
+<Note>
+Writes are atomic: the config is first written to a `.tmp` file, then renamed to the final path. If the rename fails (on Windows), it falls back to a direct write.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Theme System" icon="palette" href="/configuration/themes">
+    Learn about built-in themes and creating custom themes
+  </Card>
+  
+  <Card title="Keybindings" icon="keyboard" href="/configuration/keybindings">
+    Customize keyboard shortcuts
+  </Card>
+  
+  <Card title="Tiling Configuration" icon="table-cells" href="/configuration/tiling">
+    Configure panel layout and window management
+  </Card>
+</CardGroup>

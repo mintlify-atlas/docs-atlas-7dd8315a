@@ -1,0 +1,119 @@
+---
+title: Introduction
+description: A multiplayer vibe coding experience — games, chats, and AI assistants
+---
+
+# Welcome to Jarvis
+
+Jarvis is a shared desktop environment where multiple AI assistants, retro arcade games, live chat, and a 3D Metal-rendered orb all coexist on one screen. Connect with friends, play Asteroids or Kart Bros, talk to Claude Opus 4.6 assistants, and vibe — all at once.
+
+![Jarvis Screenshot](screenshot.png)
+
+## What is Jarvis?
+
+Jarvis brings together the power of AI-assisted coding, multiplayer gaming, and real-time collaboration into a single immersive macOS application. Whether you're building a project with AI assistance, taking a break with retro games, or chatting with friends online, Jarvis creates a unique "vibe coding" environment designed for productivity and fun.
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Multiplayer AI Assistants" icon="robot">
+    Run up to 4 Claude Opus 4.6 chat panels simultaneously with full file operations, bash commands, and code editing capabilities via the Claude Agent SDK.
+  </Card>
+  
+  <Card title="Arcade Games" icon="gamepad">
+    Embedded retro games including Jarvis Asteroids, Kart Bros, Minesweeper, Tetris, Doodle Jump, and more — all directly in the HUD.
+  </Card>
+  
+  <Card title="Live Chat & Presence" icon="comments">
+    Real-time online chat with room codes, game invites, and presence notifications. See who's online and what they're playing.
+  </Card>
+  
+  <Card title="3D Metal Orb" icon="sphere">
+    A reactive, animated orb rendered with Apple's Metal framework that visualizes audio input and system state.
+  </Card>
+  
+  <Card title="Voice Input" icon="microphone">
+    Push-to-talk with local Whisper transcription — control everything hands-free with voice commands.
+  </Card>
+  
+  <Card title="Modular Skills" icon="puzzle-piece">
+    Extensible skill system powered by Google Gemini for routing voice commands to specialized tools like domain hunting and arXiv paper matching.
+  </Card>
+</CardGroup>
+
+## Architecture Overview
+
+Jarvis combines Python and Swift to create a hybrid application:
+
+```
+main.py                  # Python entry point — mic capture, Metal bridge, event loop
+metal-app/               # Swift/Metal frontend — 3D orb, hex grid, chat panels
+skills/                  # Modular AI skill system
+  router.py              # Gemini conversation + tool routing
+  claude_code.py         # Claude Agent SDK integration (code assistant)
+  code_tools.py          # Tool dispatch (file ops, bash, search)
+voice/                   # Audio capture and transcription
+  audio.py               # Push-to-talk mic capture (Left Control)
+  whisper_client.py      # Local Whisper transcription
+connectors/              # External service integrations
+  claude_proxy.py        # OpenAI-compatible proxy for Claude
+  token_tracker.py       # Token usage tracking
+```
+
+### Technology Stack
+
+- **Frontend**: Swift + Metal (3D graphics, UI rendering)
+- **Backend**: Python 3.10+ (AI orchestration, audio processing)
+- **AI Models**: Claude Opus 4.6 (via Agent SDK), Google Gemini (voice routing)
+- **Audio**: Local Whisper transcription for voice-to-text
+- **Real-time**: WebSockets for presence and multiplayer features
+
+## Use Cases
+
+<AccordionGroup>
+  <Accordion title="Vibe Coding Sessions">
+    Use voice commands to ask AI assistants to build, debug, and ship code while the Metal orb provides ambient visualization. Perfect for live coding streams or focused development sessions.
+  </Accordion>
+  
+  <Accordion title="Multiplayer Game Sessions">
+    Invite friends with room codes to play Kart Bros or share game sessions while chatting in real-time. The presence system keeps everyone connected.
+  </Accordion>
+  
+  <Accordion title="AI-Assisted Development">
+    Run multiple Claude Opus 4.6 panels side-by-side for different parts of your project. Get help with frontend in one panel, backend in another, and testing in a third.
+  </Accordion>
+  
+  <Accordion title="Research & Discovery">
+    Use voice commands to check domain drops, browse arXiv papers, or activate custom skills — all without leaving your flow state.
+  </Accordion>
+</AccordionGroup>
+
+## System Requirements
+
+<Note>
+  Jarvis is currently **macOS-only** and requires Apple Silicon or Intel Mac with Metal support.
+</Note>
+
+**Minimum Requirements:**
+- macOS 13+ (Ventura or later)
+- Python 3.10 or newer
+- Swift 5.9+
+- 8GB RAM (16GB recommended for multiple AI panels)
+- Claude Max subscription (for Claude Code / Agent SDK features)
+
+**Optional:**
+- Google Gemini API key (enables Gemini-powered voice routing and skills)
+
+## What's Next?
+
+Ready to get started? Follow our [Quickstart Guide](/quickstart) to install Jarvis and launch your first session, or check the [Installation Guide](/installation) for detailed setup instructions.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="bolt" href="/quickstart">
+    Get Jarvis running in under 5 minutes
+  </Card>
+  
+  <Card title="Installation" icon="download" href="/installation">
+    Detailed setup and configuration
+  </Card>
+</CardGroup>

@@ -1,0 +1,489 @@
+---
+title: Multiplayer & Social
+description: Real-time presence, live chat, and collaborative features powered by Supabase
+---
+
+# Multiplayer & Social Features
+
+Jarvis includes built-in multiplayer capabilities: online presence tracking, real-time chat with end-to-end encryption, and collaborative terminal sessions.
+
+## Architecture
+
+All networking features use **Supabase Realtime** (Phoenix Channels over WebSocket):
+
+```
+Jarvis Client
+  ↓
+Supabase Realtime WebSocket
+  ↓
+Phoenix Channel v1 Protocol
+  ↓
+- Presence Tracking
+- Chat Broadcasts
+- Room Management
+```
+
+<CardGroup cols={2}>
+  <Card title="Online Presence" icon="users">
+    Track who's online with status updates and activity tracking
+  </Card>
+  
+  <Card title="Live Chat" icon="comments">
+    Multi-channel chat with E2E encryption and message signing
+  </Card>
+  
+  <Card title="Direct Messages" icon="lock">
+    End-to-end encrypted 1:1 conversations using ECDH
+  </Card>
+  
+  <Card title="Poke System" icon="hand-pointer">
+    Send notifications to other users with targeted broadcasts
+  </Card>
+</CardGroup>
+
+## Presence System
+
+### Online User Tracking
+
+The presence system tracks users across the `jarvis-presence` channel:
+
+```rust
+use jarvis_social::PresenceClient;
+
+let client = PresenceClient::new(config);
+client.track_presence(user_id, PresenceState {
+    display_name: "alice".into(),
+    status: UserStatus::Online,
+    activity: Some("Editing code".into()),
+    online_at: SystemTime::now(),
+}).await?;
+```
+
+### User Status Values
+
+<Tabs>
+  <Tab title="Online">
+    Active and available (green dot)
+    ```rust
+    UserStatus::Online
+    ```
+  </Tab>
+  
+  <Tab title="Idle">
+    Away from keyboard (yellow dot)
+    ```rust
+    UserStatus::Idle
+    ```
+  </Tab>
+  
+  <Tab title="In Game">
+    Playing arcade games (blue dot)
+    ```rust
+    UserStatus::InGame
+    ```
+  </Tab>
+  
+  <Tab title="Do Not Disturb">
+    Focused work mode (red dot)
+    ```rust
+    UserStatus::DoNotDisturb
+    ```
+  </Tab>
+</Tabs>
+
+### Presence Events
+
+```rust
+pub enum PresenceEvent {
+    Connected { online_count: usize },
+    Disconnected,
+    UserOnline { user: UserPresence },
+    UserOffline { user_id: String },
+    ActivityChanged { user: UserPresence },
+    Poked { from_user_id: String, from_name: String },
+    // ...
+}
+```
+
+### Poke System
+
+Send a notification to another user:
+
+```rust
+client.poke(target_user_id).await?;
+```
+
+In the presence panel WebView:
+
+```javascript
+window.jarvis.ipc.send('presence_poke', {
+    target_user_id: '123e4567-e89b-12d3-a456-426614174000'
+});
+```
+
+Recipient receives a desktop notification with the sender's name.
+
+## Live Chat System
+
+### Multi-Channel Chat
+
+Seven pre-configured channels:
+
+| Channel | Purpose |
+|---------|--------|
+| `# general` | Primary channel (presence tracking) |
+| `# discord` | Discord integration |
+| `# showoff` | Share projects and screenshots |
+| `# help` | Ask questions |
+| `# random` | Off-topic discussion |
+| `# games` | Gaming coordination |
+| `# memes` | Fun and memes |
+
+### Message Structure
+
+```javascript
+{
+  "id": "uuid",
+  "userId": "uuid",
+  "nick": "alice",
+  "ts": 1700000000000,
+  "text": "hello world",
+  "sig": "base64-ecdsa-signature",
+  "pubkey": "base64-spki-der",
+  "fingerprint": "aa:bb:cc:dd:ee:ff:00:11"
+}
+```
+
+### Sending Messages
+
+**Flow:**
+
+1. User types message and presses Enter
+2. AutoMod checks (keywords, spam, rate limit)
+3. Emoji shortcodes replaced (`:smile:` → 😀)
+4. Message signed with ECDSA P-256 key
+5. Broadcast on Supabase channel
+6. Rendered locally with `verifyStatus: 'self'`
+
+**Code example:**
+
+```javascript
+const message = {
+    id: crypto.randomUUID(),
+    userId: this.userId,
+    nick: this.nickname,
+    ts: Date.now(),
+    text: messageText,
+    sig: await Identity.sign(canonicalString),
+    pubkey: Identity.pubkeyBase64,
+    fingerprint: Identity.fingerprint
+};
+
+await channel.send({
+    type: 'broadcast',
+    event: 'message',
+    payload: message
+});
+```
+
+### Receiving Messages
+
+**Flow:**
+
+1. Broadcast arrives on channel subscription
+2. Self-echo prevention (skip if `userId === this.userId`)
+3. AutoMod filters (keywords, spam, rate limit)
+4. Signature verification via IPC
+5. TOFU trust check (fingerprint matches previous?)
+6. Verification badge attached (✓/⚠/✗/?)
+7. Message rendered and stored
+
+### Message Verification
+
+<Tabs>
+  <Tab title="Verified (✓)">
+    Signature valid, TOFU trusted or new identity
+    ```javascript
+    verifyStatus: 'trusted'
+    ```
+  </Tab>
+  
+  <Tab title="Key Changed (⚠)">
+    Signature valid but fingerprint differs from previous
+    ```javascript
+    verifyStatus: 'changed'
+    ```
+    System message: "alice's identity key changed (possible impersonation)"
+  </Tab>
+  
+  <Tab title="Invalid (✗)">
+    Signature verification failed
+    ```javascript
+    verifyStatus: 'invalid'
+    ```
+  </Tab>
+  
+  <Tab title="Unverified (?)">
+    No signature present (legacy message)
+    ```javascript
+    verifyStatus: 'unverified'
+    ```
+  </Tab>
+</Tabs>
+
+### Direct Messages (E2E Encrypted)
+
+**Key Exchange:**
+
+1. User clicks "DM" button in user dropdown
+2. ECDH shared key derived: `deriveSharedKey(otherDhPubkey)`
+3. Deterministic channel name: `jarvis-dm-{sorted-fingerprints}`
+4. New Supabase channel subscription created
+
+**Message Encryption:**
+
+```javascript
+const sharedKey = await Identity.deriveSharedKey(peerDhPubkey);
+const { iv, ct } = await Crypto.encrypt(plaintext, sharedKey);
+
+const dmMessage = {
+    id: crypto.randomUUID(),
+    userId: this.userId,
+    nick: this.nickname,
+    ts: Date.now(),
+    iv: iv,        // Instead of 'text'
+    ct: ct,
+    sig: await Identity.sign(`${id}|${userId}|${nick}|${ts}|${iv}|${ct}`),
+    // ...
+};
+```
+
+**Decryption:**
+
+```javascript
+const plaintext = await Crypto.decrypt(msg.iv, msg.ct, sharedKey);
+```
+
+<Note>
+DM signatures are computed over ciphertext components (iv, ct), not plaintext, to prevent chosen-plaintext attacks.
+</Note>
+
+### AutoMod System
+
+Client-side moderation runs on both outgoing and incoming messages:
+
+**Keyword Filter:**
+- Banned words checked with word-boundary regex
+- Case-insensitive matching
+- Runtime add/remove: `AutoMod.addBanWord(word)`
+
+**Rate Limiting:**
+
+| Parameter | Default |
+|-----------|--------|
+| `RATE_LIMIT_COUNT` | 5 messages |
+| `RATE_LIMIT_WINDOW` | 10 seconds |
+
+**Spam Detection:**
+- Repeated character ratio >80% → blocked
+- Last 3 identical messages → blocked
+- Periodic cleanup every 60 seconds
+
+**Configuration:**
+
+```toml
+[livechat.automod]
+enabled = true
+filter_profanity = true
+rate_limit = 5
+max_message_length = 500
+spam_detection = true
+```
+
+### Image Messages
+
+Paste or drag-drop images into chat:
+
+**Compression:**
+- Canvas resize to max 300px width
+- JPEG quality 0.5
+- Max size: 150,000 chars (~100 KB base64)
+
+**Rendering:**
+
+```javascript
+if (msg.text.startsWith('data:image/')) {
+    const img = document.createElement('img');
+    img.src = msg.text;
+    img.style.maxWidth = '300px';
+    img.onclick = () => showLightbox(msg.text);
+    container.appendChild(img);
+}
+```
+
+### Reactions
+
+Emoji reactions on hover:
+
+```javascript
+channel.send({
+    type: 'broadcast',
+    event: 'reaction',
+    payload: {
+        msgId: message.id,
+        emoji: '👍',
+        userId: this.userId,
+        action: 'add'  // or 'remove'
+    }
+});
+```
+
+16 emoji picker: 👍 ❤️ 😂 😮 😢 🎉 🔥 ✅ ❌ 👀 🚀 💯 ⚡ 🎯 🌟 ✨
+
+## Rooms & Channels
+
+### Channel Management
+
+Rust-side `ChannelManager` tracks membership:
+
+```rust
+use jarvis_social::ChannelManager;
+
+let mut manager = ChannelManager::new();
+manager.join_channel(user_id, "general");
+manager.join_channel(user_id, "games");
+
+let user_channels = manager.user_channels(user_id);
+let channel_members = manager.channel_members("general");
+```
+
+### Chat History
+
+Bounded in-memory ring buffer:
+
+```rust
+pub struct ChatHistory {
+    messages: HashMap<String, VecDeque<ChatMessage>>,
+    max_per_channel: usize,  // Default: 500
+}
+```
+
+WebView also caps history at 500 messages + 600 DOM nodes per channel.
+
+## Security Model
+
+### Cryptographic Identity
+
+Each Jarvis instance generates P-256 key pairs:
+
+1. **ECDSA signing key**: Message signing/verification
+2. **ECDH key**: Diffie-Hellman key agreement
+
+Keys stored in `~/.config/jarvis/identity.json` (mode 0600):
+
+```json
+{
+  "version": 1,
+  "ecdsa_pkcs8_b64": "...",
+  "ecdh_pkcs8_b64": "..."
+}
+```
+
+### Fingerprint
+
+First 8 bytes of `SHA-256(ECDSA SPKI DER)`, formatted as:
+
+```
+aa:bb:cc:dd:ee:ff:00:11
+```
+
+### Trust On First Use (TOFU)
+
+Nickname-to-fingerprint bindings stored in `localStorage`:
+
+```javascript
+const tofuStore = JSON.parse(localStorage.getItem('jarvis-chat-tofu') || '{}');
+
+if (!tofuStore[nick]) {
+    tofuStore[nick] = fingerprint;  // First seen
+    verifyStatus = 'trusted';
+} else if (tofuStore[nick] !== fingerprint) {
+    verifyStatus = 'changed';  // Key rotation or impersonation
+} else {
+    verifyStatus = 'trusted';  // Matches previous
+}
+```
+
+### End-to-End Encryption
+
+Three encryption contexts:
+
+1. **Channel messages**: AES-256-GCM with PBKDF2-derived room key (10k iterations)
+2. **DMs**: AES-256-GCM with ECDH-derived shared key
+3. **Mobile relay**: AES-256-GCM with ECDH (desktop ↔ mobile)
+
+### Key Material Isolation
+
+Private keys never leave Rust:
+
+```javascript
+// WebView only receives handles
+const keyHandle = await window.jarvis.ipc.request('crypto', {
+    op: 'derive_shared_key',
+    dhPubkey: peerPublicKey
+});
+
+// Encrypt using handle (key never exposed)
+const { iv, ct } = await window.jarvis.ipc.request('crypto', {
+    op: 'encrypt',
+    plaintext: message,
+    keyHandle: keyHandle
+});
+```
+
+## Configuration Reference
+
+### Presence Config
+
+```toml
+[presence]
+enabled = true
+server_url = ""         # Supabase project ref
+heartbeat_interval = 30 # seconds
+```
+
+### Livechat Config
+
+```toml
+[livechat]
+enabled = true
+server_port = 19847
+connection_timeout = 10
+
+[livechat.nickname]
+default = ""
+persist = true
+allow_change = true
+
+[livechat.nickname.validation]
+min_length = 1
+max_length = 20
+pattern = "^[a-zA-Z0-9_\\- ]+$"
+
+[livechat.automod]
+enabled = true
+filter_profanity = true
+rate_limit = 5
+max_message_length = 500
+spam_detection = true
+```
+
+Source files:
+- `jarvis-rs/crates/jarvis-social/src/`
+- `jarvis-rs/assets/panels/chat/index.html`
+- `jarvis-rs/assets/panels/presence/index.html`
+- `docs/manual/09-networking.md`
+
+<Note>
+Supabase Realtime uses Phoenix Channels v1 protocol with 25-second heartbeat and exponential backoff reconnection (1s base, 30s max).
+</Note>

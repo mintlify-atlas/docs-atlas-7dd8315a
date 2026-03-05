@@ -1,0 +1,403 @@
+---
+title: Relay Server
+description: WebSocket relay server for mobile-to-desktop bridge
+---
+
+The relay system enables a mobile phone to connect to a desktop Jarvis instance and interact with its terminal sessions. It consists of a standalone WebSocket relay server that pairs connections and forwards encrypted PTY data between endpoints.
+
+## Architecture
+
+```
+Mobile Client (React Native)
+  |
+  +-- WebSocket (wss://relay/ws)
+        |
+        v
+    Relay Server (jarvis-relay)
+        |
+        v
+  +-- WebSocket
+  |
+Desktop Client (Rust)
+```
+
+**Source files:**
+- `jarvis-rs/crates/jarvis-relay/src/main.rs`
+- `jarvis-rs/crates/jarvis-relay/src/session.rs`
+- `jarvis-rs/crates/jarvis-relay/src/protocol.rs`
+- `jarvis-rs/crates/jarvis-app/src/app_state/ws_server/`
+
+<Info>
+  The relay is a thin message forwarder that never inspects payload content. All PTY data is end-to-end encrypted between desktop and mobile endpoints.
+</Info>
+
+## Relay Server
+
+The relay server (`jarvis-relay`) is a standalone Tokio application that:
+
+- Listens for TCP connections on a configurable port (default 8080)
+- Accepts WebSocket upgrades
+- Pairs connections by session ID (one desktop + one mobile per session)
+- Forwards text frames bidirectionally between paired peers
+
+### Installation
+
+```bash
+# Build from source
+cd jarvis-rs/crates/jarvis-relay
+cargo build --release
+
+# Run
+./target/release/jarvis-relay --port 8080
+```
+
+### CLI Arguments
+
+```bash
+jarvis-relay [OPTIONS]
+
+Options:
+  -p, --port <PORT>                    Port to listen on [default: 8080]
+      --session-ttl <SECONDS>          Max stale session age [default: 300]
+      --max-connections-per-ip <N>     Per-IP concurrent limit [default: 10]
+      --max-sessions <N>               Global session cap [default: 1000]
+```
+
+## Hello Protocol
+
+The first message from each client identifies its role:
+
+<Steps>
+  <Step title="Desktop Hello">
+    Desktop clients **create** sessions:
+
+    ```json
+    {
+      "type": "desktop_hello",
+      "session_id": "abc123..."
+    }
+    ```
+
+    Response:
+    ```json
+    {
+      "type": "session_ready",
+      "session_id": "abc123..."
+    }
+    ```
+  </Step>
+
+  <Step title="Mobile Hello">
+    Mobile clients **join** existing sessions:
+
+    ```json
+    {
+      "type": "mobile_hello",
+      "session_id": "abc123..."
+    }
+    ```
+
+    Response:
+    ```json
+    {"type": "peer_connected"}
+    ```
+
+    The desktop also receives `{"type": "peer_connected"}`.
+  </Step>
+
+  <Step title="Message Forwarding">
+    After hello, all subsequent text frames are forwarded opaquely to the peer.
+  </Step>
+</Steps>
+
+## Session Lifecycle
+
+```
+Desktop connects  -->  Session created (desktop_tx = Some)
+                       Relay sends: session_ready
+
+Mobile connects   -->  mobile_tx = Some
+                       Relay sends: peer_connected to both
+
+Mobile disconnects -> mobile_tx = None
+                       Relay sends: peer_disconnected to desktop
+
+Desktop disconnects -> Session removed if both sides gone
+```
+
+### Session Store
+
+The `SessionStore` (`session.rs`) maps session IDs to `Session` structs containing optional `mpsc::Sender<String>` handles for each role:
+
+```rust
+pub struct Session {
+    pub session_id: String,
+    pub desktop_tx: Option<mpsc::Sender<String>>,
+    pub mobile_tx: Option<mpsc::Sender<String>>,
+    pub created_at: std::time::Instant,
+    pub last_activity: std::time::Instant,
+}
+```
+
+A stale session reaper runs every 60 seconds and removes sessions older than `session_ttl` (default 300 seconds) that have no mobile peer.
+
+## Rate Limiting
+
+The `RateLimiter` (`rate_limit.rs`) enforces connection limits to prevent resource exhaustion:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `max_connections_per_ip` | 10 | Concurrent WebSocket connections per IP |
+| `max_connect_rate_per_ip` | 20 | New connections per IP per 60s window |
+| `max_total_sessions` | 1000 | Global session cap |
+| `max_session_id_len` | 64 | Maximum session ID length (bytes) |
+
+Rate-limited connections are rejected **before** the WebSocket handshake completes. Stale rate-limit entries are pruned on each connection attempt.
+
+<Code>
+  ```rust
+  pub struct RateLimitConfig {
+      pub max_connections_per_ip: usize,
+      pub max_connect_rate_per_ip: usize,
+      pub rate_window_secs: u64,
+      pub max_total_sessions: usize,
+      pub max_session_id_len: usize,
+  }
+
+  impl Default for RateLimitConfig {
+      fn default() -> Self {
+          Self {
+              max_connections_per_ip: 10,
+              max_connect_rate_per_ip: 20,
+              rate_window_secs: 60,
+              max_total_sessions: 1000,
+              max_session_id_len: 64,
+          }
+      }
+  }
+  ```
+</Code>
+
+## Desktop Relay Client
+
+The desktop side connects **outbound** to the relay server.
+
+### Startup Sequence
+
+<Steps>
+  <Step title="Load Session ID">
+    Session ID is loaded from disk (`~/.config/jarvis/relay_session_id`) or generated as a 32-character alphanumeric string and persisted.
+  </Step>
+
+  <Step title="Create Broadcaster">
+    A `MobileBroadcaster` (tokio `broadcast::channel`, capacity 256) is created for PTY output fan-out.
+  </Step>
+
+  <Step title="Connect to Relay">
+    The relay client task connects to the configured relay URL, sends `desktop_hello`, and waits for `session_ready`.
+  </Step>
+
+  <Step title="Auto-Reconnect">
+    If the connection drops, exponential backoff reconnection engages (1s base, 30s max).
+  </Step>
+</Steps>
+
+### Message Flow: Desktop to Mobile
+
+```
+PTY output
+  --> poll_pty_output() on main thread
+  --> MobileBroadcaster.send(ServerMessage::PtyOutput)
+  --> relay client task receives broadcast
+  --> RelayCipher.encrypt_server_message()  (AES-256-GCM)
+  --> RelayEnvelope::Encrypted { iv, ct }
+  --> relay WebSocket --> relay server --> mobile client
+```
+
+### Message Flow: Mobile to Desktop
+
+```
+Mobile input arrives at relay server --> forwarded to desktop WebSocket
+  --> relay client task receives frame
+  --> Parse as RelayEnvelope
+  --> If Encrypted: RelayCipher.decrypt_client_message()
+  --> ClientCommand::PtyInput or PtyResize
+  --> std::sync::mpsc to main thread
+  --> poll_mobile_commands() writes to PTY
+```
+
+## Wire Protocol (Inner)
+
+Messages between desktop and mobile (inside the relay envelope):
+
+### Server (Desktop) to Client (Mobile)
+
+| Type | Fields |
+|------|--------|
+| `pty_output` | `pane_id: u32`, `data: String` |
+| `pty_exit` | `pane_id: u32`, `code: u32` |
+| `pane_list` | `panes: [PaneInfo]`, `focused_id` |
+
+**Example:**
+```json
+{
+  "type": "pty_output",
+  "pane_id": 1,
+  "data": "hello world\r\n"
+}
+```
+
+### Client (Mobile) to Server (Desktop)
+
+| Type | Fields |
+|------|--------|
+| `pty_input` | `pane_id: u32`, `data: String` |
+| `pty_resize` | `pane_id: u32`, `cols: u16`, `rows: u16` |
+| `ping` | *(empty)* |
+
+**Example:**
+```json
+{
+  "type": "pty_input",
+  "pane_id": 1,
+  "data": "ls\r"
+}
+```
+
+## Relay Envelope
+
+All messages between desktop and mobile are wrapped in a relay envelope:
+
+```rust
+pub enum RelayEnvelope {
+    KeyExchange { dh_pubkey: String },
+    Encrypted { iv: String, ct: String },
+    Plaintext { payload: String },
+}
+```
+
+- **`KeyExchange`**: Carries the DH public key (SPKI DER, base64) for ECDH
+- **`Encrypted`**: AES-256-GCM ciphertext with base64-encoded IV and ciphertext
+- **`Plaintext`**: Only accepted before encryption is established; rejected after cipher is active to prevent downgrade attacks
+
+<Info>
+  Once a cipher is established, `Plaintext` envelopes are rejected to prevent relay-initiated downgrade attacks.
+</Info>
+
+## Mobile Client
+
+The mobile client is a React Native app (`jarvis-mobile/`) using TypeScript.
+
+**Key files:**
+- `lib/relay-connection.ts` - WebSocket client implementation
+- `lib/crypto.ts` - ECDH P-256 + AES-256-GCM encryption
+- `components/CodeTerminal.tsx` - Terminal UI
+
+### Connection Flow
+
+<Steps>
+  <Step title="Parse Pairing Data">
+    ```typescript
+    // QR code format:
+    // jarvis://pair?relay=wss://host/ws&session=abc123&dhpub=...
+    const parsed = parsePairingData(qrData);
+    ```
+  </Step>
+
+  <Step title="Connect to Relay">
+    ```typescript
+    const conn = new RelayConnection();
+    conn.connect(qrData, {
+      onOutput: (data) => terminal.write(data),
+      onStatusChange: (status) => setStatus(status),
+      onError: (error) => console.error(error),
+    });
+    ```
+  </Step>
+
+  <Step title="Wait for Peer">
+    Mobile sends `mobile_hello` and waits for `peer_connected` from the relay.
+  </Step>
+
+  <Step title="Key Exchange">
+    ECDH key exchange establishes an AES-256-GCM cipher. See [Mobile Pairing](/networking/mobile-pairing) for details.
+  </Step>
+
+  <Step title="Send Input">
+    ```typescript
+    conn.sendInput('ls\r');
+    conn.sendResize(80, 24);
+    ```
+  </Step>
+</Steps>
+
+### Status Tracking
+
+```typescript
+export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+
+// Status updates:
+// 'connecting' -> 'connected' (after encryption established)
+// 'connected' -> 'connecting' (on disconnect, auto-reconnect)
+// 'connecting' -> 'error' (on fatal error)
+```
+
+## Configuration
+
+From `jarvis-rs/crates/jarvis-config/src/schema/relay.rs`:
+
+```toml
+[relay]
+url = "wss://jarvis-relay-363598788638.us-central1.run.app/ws"
+auto_connect = false
+```
+
+## Security
+
+### End-to-End Encryption
+
+All PTY data is encrypted with AES-256-GCM using a shared key derived via ECDH between desktop and mobile. The relay server sees only opaque ciphertext.
+
+### Downgrade Protection
+
+- After a cipher is established, `Plaintext` envelopes are rejected
+- `PeerDisconnected` from the relay does **not** clear the cipher (prevents relay-in-the-middle downgrade attacks)
+- Cipher is only cleared on explicit pairing revocation
+
+### Rate Limiting
+
+Per-IP connection limits and global session caps prevent resource exhaustion attacks.
+
+### Session ID Security
+
+Session IDs are 32-character alphanumeric strings (192 bits of entropy when randomly generated). They are:
+- Persisted to disk with restricted permissions (`0600` on Unix)
+- Never logged or transmitted in plaintext (only over TLS WebSocket)
+- Invalidated when pairing is revoked
+
+## Deployment
+
+The relay server is designed to be deployed as a standalone service:
+
+```dockerfile
+FROM rust:1.83 as builder
+WORKDIR /app
+COPY jarvis-rs/crates/jarvis-relay .
+RUN cargo build --release
+
+FROM debian:bookworm-slim
+COPY --from=builder /app/target/release/jarvis-relay /usr/local/bin/
+EXPOSE 8080
+CMD ["jarvis-relay", "--port", "8080"]
+```
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| `RUST_LOG` | Logging level | `jarvis_relay=info` |
+| `PORT` | Port to listen on | 8080 |
+
+### Health Check
+
+The relay does not currently expose a health check endpoint. Monitor WebSocket connection success rate and session count via logs.

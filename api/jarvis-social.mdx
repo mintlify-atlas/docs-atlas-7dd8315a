@@ -1,0 +1,370 @@
+---
+title: 'jarvis-social'
+description: 'Social features — presence, chat, channels, and collaboration'
+---
+
+## Overview
+
+The `jarvis-social` crate provides social and collaboration features:
+
+- Presence tracking (who's online)
+- Real-time chat
+- Channels and direct messages
+- Game invites and pokes
+- **Experimental**: Voice chat, screen sharing, pair programming
+
+## Public API
+
+### Identity
+
+Represents the local user.
+
+```rust
+use jarvis_social::Identity;
+
+let identity = Identity {
+    user_id: "user_123".to_string(),
+    display_name: "Alice".to_string(),
+};
+```
+
+### PresenceClient
+
+Manages presence tracking via Supabase Realtime.
+
+```rust
+use jarvis_social::{PresenceClient, PresenceConfig};
+
+let config = PresenceConfig {
+    supabase_url: "https://xxx.supabase.co".to_string(),
+    supabase_anon_key: "eyJ...".to_string(),
+    channel_name: "jarvis:presence".to_string(),
+};
+
+let client = PresenceClient::new(config);
+client.connect(identity).await?;
+```
+
+<ResponseField name="PresenceConfig" type="struct">
+  <Expandable title="Fields">
+    <ResponseField name="supabase_url" type="string" required>
+      Supabase project URL.
+    </ResponseField>
+    
+    <ResponseField name="supabase_anon_key" type="string" required>
+      Supabase anonymous API key.
+    </ResponseField>
+    
+    <ResponseField name="channel_name" type="string" required>
+      Realtime channel name for presence.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### PresenceEvent
+
+Events emitted by the presence system.
+
+<ResponseField name="PresenceEvent" type="enum">
+  - `UserJoined { user: OnlineUser }` — A user came online
+  - `UserLeft { user_id: String }` — A user went offline
+  - `UserUpdated { user: OnlineUser }` — A user's status/activity changed
+  - `Snapshot { users: Vec<OnlineUser> }` — Full list of online users
+</ResponseField>
+
+### Protocol Types
+
+#### UserStatus
+
+User presence status.
+
+<ResponseField name="UserStatus" type="enum">
+  - `Online` — Available
+  - `Idle` — Away from keyboard
+  - `InGame` — Playing a game
+  - `InSkill` — Using an AI skill
+  - `DoNotDisturb` — Do not disturb
+  - `Away` — Away
+</ResponseField>
+
+#### OnlineUser
+
+Information about an online user.
+
+<ResponseField name="OnlineUser" type="struct">
+  <Expandable title="Fields">
+    <ResponseField name="user_id" type="string" required>
+      Unique user ID.
+    </ResponseField>
+    
+    <ResponseField name="display_name" type="string" required>
+      User's display name.
+    </ResponseField>
+    
+    <ResponseField name="status" type="UserStatus" required>
+      Current status.
+    </ResponseField>
+    
+    <ResponseField name="activity" type="Option<string>" optional>
+      Current activity description (e.g., "Playing Wordle").
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Chat
+
+#### ChatHistory
+
+Manages chat message history.
+
+```rust
+use jarvis_social::{ChatHistory, ChatHistoryConfig, ChatMessage};
+
+let config = ChatHistoryConfig {
+    max_messages: 1000,
+    persist_to_disk: true,
+};
+
+let mut history = ChatHistory::new(config);
+history.add_message(ChatMessage {
+    user_id: "user_123".to_string(),
+    display_name: "Alice".to_string(),
+    content: "Hello!".to_string(),
+    timestamp: chrono::Utc::now().to_rfc3339(),
+});
+```
+
+<ResponseField name="ChatMessage" type="struct">
+  <Expandable title="Fields">
+    <ResponseField name="user_id" type="string" required>
+      ID of the user who sent the message.
+    </ResponseField>
+    
+    <ResponseField name="display_name" type="string" required>
+      Display name of the sender.
+    </ResponseField>
+    
+    <ResponseField name="content" type="string" required>
+      Message content.
+    </ResponseField>
+    
+    <ResponseField name="timestamp" type="string" required>
+      ISO 8601 timestamp.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Channels
+
+#### ChannelManager
+
+Manages multiple chat channels.
+
+```rust
+use jarvis_social::{ChannelManager, Channel};
+
+let mut manager = ChannelManager::new();
+manager.create_channel("general".to_string());
+manager.join_channel("general");
+```
+
+<ResponseField name="Channel" type="struct">
+  Represents a chat channel.
+  
+  <Expandable title="Fields">
+    <ResponseField name="name" type="string" required>
+      Channel name (e.g., `general`, `random`).
+    </ResponseField>
+    
+    <ResponseField name="members" type="Vec<string>" required>
+      List of user IDs in this channel.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Broadcast Payloads
+
+These payloads are sent via Supabase Realtime broadcasts.
+
+#### ActivityUpdatePayload
+
+<ResponseField name="ActivityUpdatePayload" type="struct">
+  <Expandable title="Fields">
+    <ResponseField name="user_id" type="string" required>
+      User ID.
+    </ResponseField>
+    
+    <ResponseField name="display_name" type="string" required>
+      Display name.
+    </ResponseField>
+    
+    <ResponseField name="status" type="UserStatus" required>
+      New status.
+    </ResponseField>
+    
+    <ResponseField name="activity" type="Option<string>" optional>
+      Activity description.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+#### GameInvitePayload
+
+<ResponseField name="GameInvitePayload" type="struct">
+  <Expandable title="Fields">
+    <ResponseField name="user_id" type="string" required>
+      Inviter's user ID.
+    </ResponseField>
+    
+    <ResponseField name="display_name" type="string" required>
+      Inviter's display name.
+    </ResponseField>
+    
+    <ResponseField name="game" type="string" required>
+      Game name (e.g., `wordle`, `tetris`).
+    </ResponseField>
+    
+    <ResponseField name="code" type="Option<string>" optional>
+      Optional game room code.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+#### PokePayload
+
+<ResponseField name="PokePayload" type="struct">
+  <Expandable title="Fields">
+    <ResponseField name="user_id" type="string" required>
+      Poker's user ID.
+    </ResponseField>
+    
+    <ResponseField name="display_name" type="string" required>
+      Poker's display name.
+    </ResponseField>
+    
+    <ResponseField name="target_user_id" type="string" required>
+      Target user ID.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+#### ChatMessagePayload
+
+<ResponseField name="ChatMessagePayload" type="struct">
+  <Expandable title="Fields">
+    <ResponseField name="user_id" type="string" required>
+      Sender's user ID.
+    </ResponseField>
+    
+    <ResponseField name="display_name" type="string" required>
+      Sender's display name.
+    </ResponseField>
+    
+    <ResponseField name="channel" type="string" required>
+      Channel name.
+    </ResponseField>
+    
+    <ResponseField name="content" type="string" required>
+      Message content.
+    </ResponseField>
+    
+    <ResponseField name="timestamp" type="string" required>
+      ISO 8601 timestamp.
+    </ResponseField>
+    
+    <ResponseField name="reply_to" type="Option<string>" optional>
+      Optional message ID this is replying to.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Experimental Features
+
+These features require the `experimental-collab` feature flag.
+
+### Voice Chat
+
+```rust
+#[cfg(feature = "experimental-collab")]
+use jarvis_social::{VoiceManager, VoiceConfig, VoiceRoom};
+
+let config = VoiceConfig::default();
+let manager = VoiceManager::new(config);
+```
+
+### Screen Sharing
+
+```rust
+#[cfg(feature = "experimental-collab")]
+use jarvis_social::{ScreenShareManager, ScreenShareConfig, ShareQuality};
+
+let config = ScreenShareConfig {
+    quality: ShareQuality::High,
+    frame_rate: 30,
+};
+let manager = ScreenShareManager::new(config);
+```
+
+### Pair Programming
+
+```rust
+#[cfg(feature = "experimental-collab")]
+use jarvis_social::{PairManager, PairConfig, PairRole, PairSession};
+
+let config = PairConfig::default();
+let manager = PairManager::new(config);
+```
+
+<ResponseField name="PairRole" type="enum">
+  - `Driver` — Has control of the terminal
+  - `Navigator` — Can view and suggest
+</ResponseField>
+
+## Usage Example
+
+```rust
+use jarvis_social::{
+    PresenceClient, PresenceConfig, PresenceEvent,
+    Identity, UserStatus
+};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = PresenceConfig {
+        supabase_url: std::env::var("SUPABASE_URL")?,
+        supabase_anon_key: std::env::var("SUPABASE_KEY")?,
+        channel_name: "jarvis:presence".to_string(),
+    };
+    
+    let identity = Identity {
+        user_id: "alice_123".to_string(),
+        display_name: "Alice".to_string(),
+    };
+    
+    let mut client = PresenceClient::new(config);
+    client.connect(identity).await?;
+    
+    // Update status
+    client.update_status(UserStatus::Online, Some("Coding in Rust")).await?;
+    
+    // Listen for events
+    while let Some(event) = client.next_event().await {
+        match event {
+            PresenceEvent::UserJoined { user } => {
+                println!("{} joined", user.display_name);
+            }
+            PresenceEvent::UserLeft { user_id } => {
+                println!("User {} left", user_id);
+            }
+            _ => {}
+        }
+    }
+    
+    Ok(())
+}
+```
+
+## Related
+
+- [Presence Configuration](/configuration/overview) — Supabase settings
+- [Livechat Configuration](/configuration/overview) — Chat server settings

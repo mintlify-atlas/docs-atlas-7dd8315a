@@ -1,0 +1,392 @@
+---
+title: Arcade Games
+description: Built-in retro games playable in terminal panes
+---
+
+# Arcade Games
+
+Jarvis includes a collection of classic arcade games that run directly in terminal panes as interactive HTML5 canvases.
+
+## Available Games
+
+<CardGroup cols={2}>
+  <Card title="Asteroids" icon="rocket">
+    Classic space shooter with vector graphics
+  </Card>
+  
+  <Card title="Tetris" icon="shapes">
+    Block-stacking puzzle game with score tracking
+  </Card>
+  
+  <Card title="Minesweeper" icon="bomb">
+    Logic puzzle with hidden mines
+  </Card>
+  
+  <Card title="Pinball" icon="circle">
+    Physics-based pinball simulation
+  </Card>
+  
+  <Card title="Doodle Jump" icon="arrow-up">
+    Vertical platformer with tilt controls
+  </Card>
+  
+  <Card title="Subway Surfers" icon="train">
+    Endless runner inspired by Subway Surfers
+  </Card>
+  
+  <Card title="Draw" icon="paintbrush">
+    Freehand drawing canvas
+  </Card>
+  
+  <Card title="Video Player" icon="play">
+    Simple video playback in pane
+  </Card>
+</CardGroup>
+
+## Launching Games
+
+### Via Command Palette
+
+1. Press `Cmd+K` (or your configured keybind)
+2. Type "game" to filter
+3. Select a game from the list
+
+### Via Keybinds
+
+Configure custom keybinds in `jarvis.toml`:
+
+```toml
+[[keybind]]
+key = "G"
+shift = true
+command = "OpenGame"
+args = {game = "asteroids"}
+```
+
+### Programmatic Launch
+
+```rust
+use jarvis_app::Action;
+
+app.dispatch(Action::OpenGame {
+    game: "tetris".into()
+});
+```
+
+## Game Details
+
+### Asteroids
+
+**Controls:**
+- Arrow keys: Rotate and thrust
+- Space: Shoot
+- R: Restart after game over
+
+**Features:**
+- Neon vector graphics with glow effects
+- Progressive difficulty
+- Score and lives tracking
+- Particle effects
+
+**File:** `jarvis-rs/assets/panels/games/asteroids.html`
+
+### Tetris
+
+**Controls:**
+- Left/Right: Move piece
+- Up: Rotate
+- Down: Soft drop
+- Space: Hard drop
+- P: Pause
+
+**Features:**
+- Classic NES-style gameplay
+- Line clear animations
+- Level progression
+- High score persistence
+
+**File:** `jarvis-rs/assets/panels/games/tetris.html`
+
+### Minesweeper
+
+**Controls:**
+- Left click: Reveal cell
+- Right click: Flag mine
+- Double click: Chord (reveal neighbors)
+
+**Difficulty levels:**
+- Beginner: 9×9, 10 mines
+- Intermediate: 16×16, 40 mines
+- Expert: 30×16, 99 mines
+
+**File:** `jarvis-rs/assets/panels/games/minesweeper.html`
+
+### Pinball
+
+**Controls:**
+- Z: Left flipper
+- M: Right flipper
+- Space: Launch ball
+
+**Features:**
+- Matter.js physics engine
+- Bumpers, targets, and ramps
+- Multiball mode
+- Tilt detection
+
+**Files:**
+- `jarvis-rs/assets/panels/games/pinball.html`
+- `jarvis-rs/assets/panels/games/pinball.js`
+- `jarvis-rs/assets/panels/games/pinball.css`
+
+### Doodle Jump
+
+**Controls:**
+- Arrow keys or A/D: Move left/right
+- Auto-jump on platform contact
+
+**Features:**
+- Infinite vertical scrolling
+- Moving platforms
+- Springs and trampolines
+- Score tracking
+
+**File:** `jarvis-rs/assets/panels/games/doodlejump.html`
+
+### Subway Surfers
+
+**Controls:**
+- Arrow keys: Move and jump
+- Space: Jump
+
+**Features:**
+- Lane-based endless runner
+- Obstacles and coins
+- Speed increases over time
+- Distance tracking
+
+**File:** `jarvis-rs/assets/panels/games/subway.html`
+
+### Draw
+
+**Controls:**
+- Mouse: Draw freehand
+- Color picker: Change brush color
+- Size slider: Adjust brush size
+- Clear button: Reset canvas
+
+**Features:**
+- Smooth brush strokes
+- Customizable colors and sizes
+- Export to image
+
+**File:** `jarvis-rs/assets/panels/games/draw.html`
+
+### Video Player
+
+**Controls:**
+- Play/Pause button
+- Seek bar
+- Volume control
+
+**Supported formats:**
+- MP4, WebM, OGG
+- H.264, VP8, VP9 codecs
+
+**File:** `jarvis-rs/assets/panels/games/videoplayer.html`
+
+## Game Architecture
+
+All games run as WebView panels:
+
+```
+Game HTML → WebView Panel → jarvis://localhost/games/{game}.html
+```
+
+### Game Loading
+
+When `OpenGame` action is dispatched:
+
+1. Check if game HTML exists in assets
+2. Create new pane with `PaneKind::WebView`
+3. Load game URL: `jarvis://localhost/games/{game}.html`
+4. Game initializes in isolated WebView context
+
+### Game State
+
+Each game manages its own state:
+- Score, level, lives in JavaScript
+- LocalStorage for high scores
+- Canvas rendering via `requestAnimationFrame`
+
+### No IPC Required
+
+Games are self-contained HTML/JS/CSS:
+- No Rust backend interaction
+- Pure client-side rendering
+- Keyboard events handled in WebView
+
+## Adding Custom Games
+
+### 1. Create Game HTML
+
+Add file to `jarvis-rs/assets/panels/games/`:
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>My Game</title>
+    <style>
+        canvas { display: block; margin: 0 auto; }
+    </style>
+</head>
+<body>
+    <canvas id="game" width="800" height="600"></canvas>
+    <script>
+        const canvas = document.getElementById('game');
+        const ctx = canvas.getContext('2d');
+        
+        function gameLoop() {
+            // Update game state
+            // Render frame
+            requestAnimationFrame(gameLoop);
+        }
+        
+        gameLoop();
+    </script>
+</body>
+</html>
+```
+
+### 2. Add to Asset Registry
+
+Games are automatically discovered from the assets directory. No registration needed.
+
+### 3. Launch via Action
+
+```rust
+Action::OpenGame { game: "mygame".into() }
+```
+
+### Example: Simple Pong
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Pong</title>
+    <style>
+        body { margin: 0; background: #000; overflow: hidden; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="game"></canvas>
+    <script>
+        const canvas = document.getElementById('game');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 800;
+        canvas.height = 600;
+        
+        let paddle = { x: 10, y: 250, w: 10, h: 100, dy: 0 };
+        let ball = { x: 400, y: 300, dx: 3, dy: 3, r: 5 };
+        
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowUp') paddle.dy = -5;
+            if (e.key === 'ArrowDown') paddle.dy = 5;
+        });
+        
+        document.addEventListener('keyup', () => paddle.dy = 0);
+        
+        function update() {
+            paddle.y += paddle.dy;
+            ball.x += ball.dx;
+            ball.y += ball.dy;
+            
+            if (ball.y <= 0 || ball.y >= canvas.height) ball.dy *= -1;
+            if (ball.x <= paddle.x + paddle.w && 
+                ball.y >= paddle.y && 
+                ball.y <= paddle.y + paddle.h) {
+                ball.dx *= -1;
+            }
+        }
+        
+        function draw() {
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(paddle.x, paddle.y, paddle.w, paddle.h);
+            
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+        
+        gameLoop();
+    </script>
+</body>
+</html>
+```
+
+Save as `jarvis-rs/assets/panels/games/pong.html` and launch with:
+
+```rust
+Action::OpenGame { game: "pong".into() }
+```
+
+## Best Practices
+
+### Performance
+
+- Use `requestAnimationFrame` for smooth 60 FPS
+- Limit canvas size to avoid overdraw
+- Cache static elements
+- Use sprite atlases for textures
+
+### Input Handling
+
+```javascript
+// Prevent keyboard shortcuts from triggering Jarvis actions
+document.addEventListener('keydown', (e) => {
+    e.preventDefault();  // Stop propagation to app
+    // Handle game input
+});
+```
+
+### Responsive Sizing
+
+```javascript
+function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+```
+
+### Score Persistence
+
+```javascript
+// Save high score
+localStorage.setItem('jarvis-game-highscore', score);
+
+// Load high score
+const highScore = parseInt(localStorage.getItem('jarvis-game-highscore')) || 0;
+```
+
+Source files:
+- `jarvis-rs/assets/panels/games/*.html`
+- Game assets served via `jarvis://localhost` protocol
+
+<Note>
+Games run in isolated WebView contexts with full HTML5 Canvas API access. No special permissions required.
+</Note>

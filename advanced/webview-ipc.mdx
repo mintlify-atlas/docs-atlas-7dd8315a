@@ -1,0 +1,288 @@
+---
+title: "WebView & IPC Bridge"
+description: "Bidirectional communication between Rust and JavaScript"
+---
+
+## Overview
+
+Jarvis uses the [wry](https://github.com/tauri-apps/wry) crate to embed web content into tiling panes. Every pane displaying web content gets its own WebView instance, served through a custom `jarvis://` protocol.
+
+<CardGroup cols={2}>
+  <Card title="Custom Protocol" icon="link">
+    Assets served via `jarvis://localhost/` URLs
+  </Card>
+  <Card title="Bidirectional IPC" icon="arrows-left-right">
+    Type-safe JSON messages between Rust and JavaScript
+  </Card>
+  <Card title="Child Windows" icon="window-maximize">
+    WebViews positioned by tiling layout engine
+  </Card>
+  <Card title="Theme Bridge" icon="palette">
+    CSS variables injected from config
+  </Card>
+</CardGroup>
+
+## Custom Protocol
+
+### URL Format
+
+All bundled panel assets are loaded via the `jarvis://` scheme:
+
+```
+jarvis://localhost/{path-to-asset}
+```
+
+### Panel Mapping
+
+Each pane type maps to a specific URL:
+
+| Pane Type | URL |
+|-----------|-----|
+| Terminal | `jarvis://localhost/terminal/index.html` |
+| Assistant | `jarvis://localhost/assistant/index.html` |
+| Chat | `jarvis://localhost/chat/index.html` |
+| Settings | `jarvis://localhost/settings/index.html` |
+| Presence | `jarvis://localhost/presence/index.html` |
+| Games | `jarvis://localhost/games/{game}.html` |
+| Plugin | `jarvis://localhost/plugins/{id}/index.html` |
+
+<Info>
+Every response includes `Access-Control-Allow-Origin: *` to enable CORS for dynamic content loading.
+</Info>
+
+## JavaScript IPC API
+
+### Sending Messages to Rust
+
+The `window.ipc` global object provides message-passing APIs:
+
+```typescript
+interface JarvisIpc {
+  postMessage(message: string): void;
+  on(handler: (message: string) => void): void;
+}
+
+declare global {
+  interface Window {
+    ipc: JarvisIpc;
+  }
+}
+```
+
+### Example: Panel Focus
+
+```javascript
+window.ipc.postMessage(JSON.stringify({
+  kind: "panel_focus",
+  payload: {}
+}));
+```
+
+### Example: PTY Input
+
+```javascript
+window.ipc.postMessage(JSON.stringify({
+  kind: "pty_input",
+  payload: { data: "ls -la\n" }
+}));
+```
+
+## Rust to JavaScript Messages
+
+Rust sends messages by calling `webview.evaluate_script()` with a JavaScript snippet:
+
+```rust
+let message = serde_json::to_string(&message)?;
+let js = format!("window.ipcReceive({})", message);
+webview.evaluate_script(&js)?;
+```
+
+### Event Handler Setup
+
+JavaScript panels register an event handler:
+
+```javascript
+window.ipcReceive = (message) => {
+  console.log('Received from Rust:', message);
+  
+  switch (message.kind) {
+    case 'config_updated':
+      updateTheme(message.payload.theme);
+      break;
+    case 'terminal_output':
+      term.write(message.payload.data);
+      break;
+    case 'palette_show':
+      showCommandPalette(message.payload.items);
+      break;
+  }
+};
+```
+
+## IPC Message Reference
+
+### JavaScript → Rust
+
+<AccordionGroup>
+  <Accordion title="panel_focus">
+    Notifies Rust that this panel wants focus.
+    
+    ```json
+    { "kind": "panel_focus", "payload": {} }
+    ```
+  </Accordion>
+  
+  <Accordion title="keybind">
+    Triggers a keybind action by name.
+    
+    ```json
+    { "kind": "keybind", "payload": { "action": "OpenCommandPalette" } }
+    ```
+  </Accordion>
+  
+  <Accordion title="clipboard_copy / clipboard_paste">
+    Clipboard operations.
+    
+    ```json
+    { "kind": "clipboard_copy", "payload": { "text": "copied text" } }
+    { "kind": "clipboard_paste", "payload": {} }
+    ```
+  </Accordion>
+  
+  <Accordion title="pty_input">
+    Sends input to the terminal PTY.
+    
+    ```json
+    { "kind": "pty_input", "payload": { "data": "echo hello\n" } }
+    ```
+  </Accordion>
+  
+  <Accordion title="palette_click / palette_hover / palette_dismiss">
+    Command palette interaction.
+    
+    ```json
+    { "kind": "palette_click", "payload": { "index": 0 } }
+    { "kind": "palette_hover", "payload": { "index": 2 } }
+    { "kind": "palette_dismiss", "payload": {} }
+    ```
+  </Accordion>
+  
+  <Accordion title="debug_event">
+    Logs a debug event for troubleshooting.
+    
+    ```json
+    { "kind": "debug_event", "payload": { "message": "xterm ready" } }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Rust → JavaScript
+
+<AccordionGroup>
+  <Accordion title="palette_show / palette_update / palette_hide">
+    Command palette lifecycle.
+    
+    ```json
+    { "kind": "palette_show", "payload": { "items": [...] } }
+    { "kind": "palette_update", "payload": { "items": [...], "filter": "te" } }
+    { "kind": "palette_hide", "payload": {} }
+    ```
+  </Accordion>
+  
+  <Accordion title="config_updated">
+    Theme or config changed.
+    
+    ```json
+    { "kind": "config_updated", "payload": { "theme": {...} } }
+    ```
+  </Accordion>
+  
+  <Accordion title="terminal_output">
+    PTY output for xterm.js.
+    
+    ```json
+    { "kind": "terminal_output", "payload": { "data": "\u001b[32mhello\u001b[0m" } }
+    ```
+  </Accordion>
+  
+  <Accordion title="assistant_message">
+    AI assistant response chunk.
+    
+    ```json
+    { "kind": "assistant_message", "payload": { "text": "Sure, I can help..." } }
+    ```
+  </Accordion>
+  
+  <Accordion title="presence_update">
+    Online users changed.
+    
+    ```json
+    { "kind": "presence_update", "payload": { "users": [...] } }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Theme Bridge
+
+Rust injects CSS custom properties into every WebView based on the current theme:
+
+```javascript
+const style = document.createElement('style');
+style.textContent = `
+  :root {
+    --jarvis-bg: #1a1a1a;
+    --jarvis-fg: #e0e0e0;
+    --jarvis-accent: #8b5cf6;
+    --jarvis-border: #3a3a3a;
+    /* ...17 total color variables */
+  }
+`;
+document.head.appendChild(style);
+```
+
+When config changes, Rust sends a `config_updated` message and panels re-inject the theme.
+
+<Tip>
+Use `var(--jarvis-*)` in your CSS to match the global theme automatically.
+</Tip>
+
+## Navigation Security
+
+Navigation is restricted by an allowlist:
+
+```rust
+pub const ALLOWED_PREFIXES: &[&str] = &[
+    "jarvis://localhost/",
+    "http://localhost:",
+    "http://127.0.0.1:",
+    "https://",
+];
+```
+
+Any URL not matching these prefixes is blocked with:
+
+```
+Navigation to {url} blocked by allowlist
+```
+
+<Warning>
+Plugins loaded from the filesystem have additional restrictions—they can only navigate to their own `plugin://` URLs.
+</Warning>
+
+## Keyboard Interception
+
+WebViews can prevent Rust from processing keyboard shortcuts by setting:
+
+```javascript
+window.jarvisPreventDefaultKeys = true;
+```
+
+When `true`, Rust does not interpret keybinds for that WebView—useful for terminals and text editors.
+
+## Source References
+
+- `jarvis-rs/crates/jarvis-webview/src/ipc.rs` - IPC message types
+- `jarvis-rs/crates/jarvis-webview/src/manager.rs` - WebView lifecycle
+- `jarvis-rs/crates/jarvis-webview/src/theme_bridge/mod.rs` - CSS injection
+- `jarvis-rs/crates/jarvis-app/src/app_state/webview_bridge/` - IPC dispatch
+- `docs/manual/06-webview-ipc.md` - Complete reference

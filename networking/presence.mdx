@@ -1,0 +1,343 @@
+---
+title: Presence System
+description: Track online users and activity status in real-time using Supabase Realtime
+---
+
+The presence system tracks which Jarvis users are online, their current status, and activity. It connects to Supabase Realtime via Phoenix Channels and maintains real-time user state across all connected instances.
+
+## Architecture
+
+```
+PresenceClient (Rust)
+  |
+  +-- RealtimeClient (WebSocket)
+  |     |
+  |     +-- wss://<project>.supabase.co/realtime/v1/websocket
+  |
+  +-- event_translator task
+        |
+        +-- PresenceEvent stream --> UI
+```
+
+The Rust-side `PresenceClient` (`jarvis-rs/crates/jarvis-social/src/presence/`) handles all communication with Supabase Realtime. A background event translator task converts low-level WebSocket events into high-level presence events consumed by the UI.
+
+**Source files:**
+- `jarvis-rs/crates/jarvis-social/src/presence/client.rs`
+- `jarvis-rs/crates/jarvis-social/src/presence/types.rs`
+- `presence/client.py` (Python implementation)
+
+## Connection Flow
+
+<Steps>
+  <Step title="Initialize Client">
+    Create a `PresenceClient` with your identity and configuration:
+
+    ```rust
+    let config = PresenceConfig {
+        project_ref: "your-project-ref".to_string(),
+        api_key: "your-anon-key".to_string(),
+        access_token: None,
+        heartbeat_interval: 25,
+        reconnect_delay: 1,
+        max_reconnect_delay: 30,
+    };
+
+    let identity = Identity {
+        user_id: uuid::Uuid::new_v4().to_string(),
+        display_name: "alice".to_string(),
+        access_token: None,
+    };
+
+    let mut client = PresenceClient::new(identity, config);
+    ```
+  </Step>
+
+  <Step title="Connect and Subscribe">
+    Start the connection and receive presence events:
+
+    ```rust
+    let mut event_rx = client.start();
+
+    // Process events in your main loop
+    while let Some(event) = event_rx.recv().await {
+        match event {
+            PresenceEvent::Connected { online_count } => {
+                println!("Connected! {} users online", online_count);
+            }
+            PresenceEvent::UserOnline(user) => {
+                println!("{} is now online", user.display_name);
+            }
+            // ... handle other events
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Track Your Presence">
+    The client automatically tracks your presence on the `jarvis-presence` channel with this payload:
+
+    ```json
+    {
+      "user_id": "<uuid>",
+      "display_name": "alice",
+      "status": "online",
+      "activity": null,
+      "online_at": "2026-03-05T12:00:00Z"
+    }
+    ```
+  </Step>
+</Steps>
+
+## User Status Values
+
+The presence system supports six status values:
+
+```rust
+pub enum UserStatus {
+    Online,       // Default - user is active
+    Idle,         // User is away from keyboard
+    InGame,       // User is playing a game
+    InSkill,      // User is running a skill
+    DoNotDisturb, // User doesn't want notifications
+    Away,         // User is away
+}
+```
+
+## Presence Events
+
+| Event | Description | Payload |
+|-------|-------------|----------|
+| `Connected` | Channel joined successfully | `online_count: u32` |
+| `Disconnected` | Connection lost | *(none)* |
+| `UserOnline` | Another user joined | `OnlineUser` struct |
+| `UserOffline` | Another user left | `user_id`, `display_name` |
+| `ActivityChanged` | User's status or activity changed | `OnlineUser` struct |
+| `GameInvite` | User broadcast a game invitation | `user_id`, `display_name`, `game`, `code` |
+| `Poked` | Someone poked this user | `user_id`, `display_name` |
+| `ChatMessage` | Chat message on presence channel | `user_id`, `display_name`, `channel`, `content` |
+| `Error` | Connection or protocol error | `String` (error message) |
+
+## Protocol Messages
+
+### Activity Update
+
+Broadcast when a user's status or activity changes:
+
+```json
+{
+  "type": "activity_update",
+  "user_id": "<uuid>",
+  "display_name": "alice",
+  "status": "in_game",
+  "activity": "Playing Snake"
+}
+```
+
+<Code>
+  ```rust
+  // Send an activity update
+  client.update_activity(
+      UserStatus::InGame,
+      Some("Playing Snake".to_string())
+  ).await;
+  ```
+</Code>
+
+### Game Invite
+
+Broadcast a game invitation to all online users:
+
+```json
+{
+  "type": "game_invite",
+  "user_id": "<uuid>",
+  "display_name": "alice",
+  "game": "snake",
+  "code": "ROOM123"
+}
+```
+
+<Code>
+  ```rust
+  client.send_invite("snake", Some("ROOM123".to_string())).await;
+  ```
+</Code>
+
+### Poke
+
+Send a targeted notification to a specific user:
+
+```json
+{
+  "type": "poke",
+  "user_id": "<sender-uuid>",
+  "display_name": "alice",
+  "target_user_id": "<recipient-uuid>"
+}
+```
+
+<Code>
+  ```rust
+  client.send_poke("target-user-id").await;
+  ```
+</Code>
+
+## Python Client
+
+Jarvis also includes a Python presence client (`presence/client.py`) with similar functionality:
+
+```python
+from presence.client import PresenceClient
+
+client = PresenceClient(
+    server_url="wss://project.supabase.co/realtime/v1/websocket",
+    user_id="alice-123",
+    display_name="alice"
+)
+
+# Set callback for notifications
+def handle_notification(event_type, data):
+    if event_type == "user_online":
+        print(f"{data['display_name']} is online")
+    elif event_type == "poke":
+        print(f"Poked by {data['display_name']}!")
+
+client.on_notification = handle_notification
+
+# Run the client
+await client.run()
+```
+
+### Python Protocol Messages
+
+**Connect:**
+```python
+await ws.send(json.dumps({
+    "type": "connect",
+    "user_id": "alice-123",
+    "display_name": "alice",
+    "version": "1"
+}))
+```
+
+**Heartbeat:**
+```python
+# Sent every 30 seconds
+await ws.send(json.dumps({"type": "ping"}))
+```
+
+**Response:**
+```json
+{"type": "pong", "online_count": 5}
+```
+
+## Heartbeat and Reconnection
+
+<Info>
+  The Supabase Realtime connection uses Phoenix heartbeat messages to maintain the connection.
+</Info>
+
+### Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `heartbeat_interval` | 25s | How often to send heartbeat messages |
+| `reconnect_delay` | 1s | Base delay before reconnecting |
+| `max_reconnect_delay` | 30s | Maximum reconnection delay |
+
+### Reconnection Strategy
+
+The client uses exponential backoff for reconnection:
+
+```rust
+delay = min(delay * 2, max_reconnect_delay)
+```
+
+On reconnect, the client automatically:
+1. Re-joins the `jarvis-presence` channel
+2. Re-tracks presence with current status
+3. Receives full presence state from the server
+
+## OnlineUser Structure
+
+```rust
+pub struct OnlineUser {
+    pub user_id: String,
+    pub display_name: String,
+    pub status: UserStatus,
+    pub activity: Option<String>,
+    pub online_at: String,
+}
+```
+
+## Integration Example
+
+```rust
+use jarvis_social::presence::{PresenceClient, PresenceConfig, PresenceEvent};
+use jarvis_social::identity::Identity;
+use jarvis_social::protocol::UserStatus;
+
+#[tokio::main]
+async fn main() {
+    // Create identity
+    let identity = Identity {
+        user_id: uuid::Uuid::new_v4().to_string(),
+        display_name: std::env::var("USER").unwrap_or("jarvis".to_string()),
+        access_token: None,
+    };
+
+    // Configure presence
+    let config = PresenceConfig {
+        project_ref: "your-project".to_string(),
+        api_key: "your-key".to_string(),
+        ..Default::default()
+    };
+
+    // Start client
+    let mut client = PresenceClient::new(identity, config);
+    let mut events = client.start();
+
+    // Process events
+    tokio::spawn(async move {
+        while let Some(event) = events.recv().await {
+            match event {
+                PresenceEvent::Connected { online_count } => {
+                    println!("🟢 Connected ({} online)", online_count);
+                }
+                PresenceEvent::UserOnline(user) => {
+                    println!("👋 {} joined", user.display_name);
+                }
+                PresenceEvent::Poked { display_name, .. } => {
+                    println!("👉 Poked by {}!", display_name);
+                    // Show desktop notification
+                }
+                _ => {}
+            }
+        }
+    });
+
+    // Update activity
+    client.update_activity(
+        UserStatus::InSkill,
+        Some("Running a terminal command".to_string())
+    ).await;
+
+    // Send a poke
+    client.send_poke("another-user-id").await;
+}
+```
+
+## Configuration Reference
+
+From `jarvis-rs/crates/jarvis-config/src/schema/social.rs`:
+
+```toml
+[presence]
+enabled = true
+server_url = ""         # Supabase project ref
+heartbeat_interval = 30 # seconds
+```
+
+## Channel Name
+
+All presence events use the channel name `jarvis-presence`. This is a constant defined in `client.rs:23`.

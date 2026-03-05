@@ -1,80 +1,315 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get Jarvis running in under 5 minutes
 ---
 
-## Get started in three steps
+# Quickstart Guide
 
-Get your documentation site running locally and make your first customization.
+This guide will get you from zero to a working Jarvis installation in under 5 minutes.
 
-### Step 1: Set up your local environment
+<Note>
+  This quickstart assumes you're on **macOS 13+** with Xcode Command Line Tools already installed.
+</Note>
+
+## Prerequisites Check
+
+Before you begin, verify you have:
+
+<Steps>
+  <Step title="macOS 13 or later">
+    Check your version with:
+    ```bash
+    sw_vers -productVersion
+    ```
+  </Step>
+  
+  <Step title="Xcode Command Line Tools">
+    Install if needed:
+    ```bash
+    xcode-select --install
+    ```
+  </Step>
+  
+  <Step title="Python 3.10 or newer">
+    Check your version:
+    ```bash
+    python3 --version
+    ```
+    
+    Install with Homebrew if needed:
+    ```bash
+    brew install python@3.12
+    ```
+  </Step>
+</Steps>
+
+## One-Command Install
+
+Clone the repository and run the automated setup script:
+
+```bash
+# Clone Jarvis
+git clone https://github.com/your-org/jarvis.git
+cd jarvis
+
+# Run setup script
+./setup.sh
+```
+
+The setup script will:
+1. Create a Python virtual environment (`.venv`)
+2. Install Python dependencies from `requirements.txt`
+3. Build the Swift/Metal application
+4. Create the config directory at `~/.config/jarvis/`
+
+<Note>
+  The initial Swift build may take 2-3 minutes depending on your machine.
+</Note>
+
+## Configure Environment
+
+Create a `.env` file in the project root:
+
+```bash
+touch .env
+```
+
+Add your API credentials:
+
+```bash .env
+CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token-here
+GOOGLE_API_KEY=your-gemini-api-key-here  # optional
+```
+
+<Warning>
+  Keep your `.env` file secure and never commit it to version control. It contains sensitive API credentials.
+</Warning>
+
+### Get Your Claude OAuth Token
+
+If you have a Claude Max subscription, run the login script to set up authentication:
+
+```bash
+./login.sh
+```
+
+This script will:
+1. Launch the Claude Code OAuth flow in your browser
+2. Extract the access token from macOS Keychain after authentication
+3. Automatically write `CLAUDE_CODE_OAUTH_TOKEN` to your `.env` file
+
+<Note>
+  The OAuth token expires periodically. Re-run `./login.sh` whenever the code assistant stops authenticating.
+</Note>
+
+## Launch Jarvis
+
+Start the application:
+
+```bash
+./start.sh
+```
+
+You should see:
+- The Metal window opens with the 3D orb
+- Console output: `JARVIS — Personal AI Assistant`
+- Status: `Metal display active. PTT: Left Control`
+
+## First Voice Command
+
+Try your first voice interaction:
+
+<Steps>
+  <Step title="Activate Push-to-Talk">
+    Hold down **Left Control** (or **Option + Period**)
+  </Step>
+  
+  <Step title="Speak a command">
+    Say: *"Help me with code"*
+    
+    The orb will visualize your audio input as you speak.
+  </Step>
+  
+  <Step title="Release to send">
+    Release the key when done speaking. Whisper will transcribe your audio locally.
+  </Step>
+  
+  <Step title="AI responds">
+    A chat panel opens with Claude Opus 4.6 Assistant ready to help:
+    
+    ```
+    Opus 4.6 Assistant 1 ready. Type or speak your request.
+    ```
+  </Step>
+</Steps>
+
+## Try Some Commands
+
+Once the assistant panel is open, try these:
+
+<CodeGroup>
+```bash Voice Commands
+# Launch games
+"Play asteroids"
+"Launch kart bros"
+"Open minesweeper"
+
+# Open utilities
+"New window"          # Spawn another AI assistant panel
+"Open chat"           # Launch live chat
+"Open localhost:3000" # Open a URL in embedded browser
+
+# Code assistance
+"Read main.py"
+"Search for TODO in the project"
+"Run the tests"
+```
+
+```bash Keyboard Shortcuts
+Left Control        # Push-to-talk (hold)
+Option + Period     # Alternative push-to-talk
+Cmd + G             # Toggle hotkey overlay
+Escape              # Close current panel / quit
+```
+</CodeGroup>
+
+## Quick Examples
+
+### Example 1: Code Review
+
+<Steps>
+  <Step title="Activate voice">
+    Hold **Left Control**
+  </Step>
+  
+  <Step title="Request review">
+    Say: *"Review the router.py file and suggest improvements"*
+  </Step>
+  
+  <Step title="AI analyzes">
+    The assistant will:
+    - Read `skills/router.py`
+    - Analyze the code structure
+    - Provide suggestions with inline examples
+  </Step>
+</Steps>
+
+### Example 2: Spawn Multiple Assistants
+
+<Steps>
+  <Step title="Open first assistant">
+    Say: *"Help me with code"*
+  </Step>
+  
+  <Step title="Split window">
+    Say: *"New window"* or *"Split window"*
+  </Step>
+  
+  <Step title="Work in parallel">
+    Now you have 2 independent AI panels. Ask different questions in each:
+    - Panel 1: Frontend work
+    - Panel 2: Backend work
+    
+    Switch panels by clicking or using voice commands in each.
+  </Step>
+</Steps>
+
+### Example 3: Game Break
+
+<Steps>
+  <Step title="Open a game">
+    Say: *"Play asteroids"* or *"Launch kart bros"*
+  </Step>
+  
+  <Step title="Invite friends (optional)">
+    For multiplayer games like Kart Bros, the presence system lets you send invites to online friends.
+  </Step>
+  
+  <Step title="Return to work">
+    Say: *"Close window"* or press **Escape** to exit the game and return to the assistant.
+  </Step>
+</Steps>
+
+## Troubleshooting
 
 <AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+  <Accordion title="Swift build fails">
+    Ensure you have Xcode Command Line Tools:
+    ```bash
+    xcode-select --install
+    ```
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
+    Check Swift version:
+    ```bash
+    swift --version  # Should be 5.9+
+    ```
   </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+  
+  <Accordion title="Claude assistant not responding">
+    Your OAuth token may have expired. Re-authenticate:
+    ```bash
+    ./login.sh
+    ```
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
+    Verify the token in `.env`:
+    ```bash
+    grep CLAUDE_CODE_OAUTH_TOKEN .env
+    ```
+  </Accordion>
+  
+  <Accordion title="No audio / voice not working">
+    Check microphone permissions:
+    1. Open **System Settings** → **Privacy & Security** → **Microphone**
+    2. Ensure Terminal (or your terminal app) has microphone access
+    
+    Test audio device:
+    ```bash
+    python -c "import sounddevice; print(sounddevice.query_devices())"
+    ```
+  </Accordion>
+  
+  <Accordion title="Gemini skills disabled">
+    This is normal if `GOOGLE_API_KEY` is not set. Voice routing will still work with Claude-only mode.
+    
+    To enable Gemini skills:
+    1. Get an API key from [Google AI Studio](https://makersuite.google.com/app/apikey)
+    2. Add to `.env`: `GOOGLE_API_KEY=your-key-here`
+    3. Restart Jarvis
   </Accordion>
 </AccordionGroup>
 
-### Step 2: Deploy your changes
+## View Logs
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+If something isn't working, check the logs:
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+```bash
+# Python logs
+tail -f jarvis.log
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+# Or ask Jarvis to copy logs to clipboard
+# In the assistant panel, say: "show logs"
+```
 
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
+## Next Steps
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Installation Guide" icon="gear" href="/installation">
+    Deep dive into configuration and advanced setup
+  </Card>
+  
+  <Card title="Skills & Commands" icon="wand-magic-sparkles" href="/features/ai-assistants">
+    Explore all available voice commands and skills
+  </Card>
+  
+  <Card title="Plugin System" icon="plug" href="/plugins/overview">
+    Build custom panels and tools
+  </Card>
+  
+  <Card title="Manual" icon="book" href="/architecture/overview">
+    Complete technical reference
+  </Card>
 </CardGroup>
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  **Enjoying Jarvis?** Star the project on GitHub and share your vibe coding sessions!
 </Note>

@@ -1,0 +1,476 @@
+---
+title: 'IPC Events'
+description: 'Rust to JavaScript IPC event reference'
+---
+
+## Overview
+
+Jarvis can send events from Rust to JavaScript in WebViews. JavaScript code registers handlers with `window.jarvis.ipc.on()` to receive these events.
+
+## Receiving Events
+
+### JavaScript API
+
+```javascript
+// Register an event handler
+window.jarvis.ipc.on('event_name', (payload) => {
+    console.log('Received event:', payload);
+});
+```
+
+### Sending from Rust
+
+```rust
+use jarvis_webview::ipc::js_dispatch_message;
+use serde_json::json;
+
+// Generate JavaScript to dispatch an event
+let js = js_dispatch_message(
+    "event_name",
+    &json!({ "key": "value" })
+);
+
+// Execute in the WebView
+handle.eval(&js);
+```
+
+## Built-in Event Types
+
+### Command Palette
+
+#### palette_show
+
+Show the command palette overlay.
+
+<ParamField path="event" type="string" default="palette_show">
+  Event name.
+</ParamField>
+
+<ParamField path="payload" type="object">
+  Command palette state.
+  
+  <Expandable title="Fields">
+    <ParamField path="items" type="array" required>
+      Array of palette items.
+      
+      Each item:
+      ```json
+      {
+        "label": "New Terminal",
+        "keybind": "Cmd+T",
+        "category": "Panels"
+      }
+      ```
+    </ParamField>
+    
+    <ParamField path="query" type="string" required>
+      Current search query.
+    </ParamField>
+    
+    <ParamField path="selectedIndex" type="number" required>
+      Index of the selected item.
+    </ParamField>
+    
+    <ParamField path="mode" type="string" required>
+      Palette mode: `"command"` or `"url_input"`.
+    </ParamField>
+    
+    <ParamField path="placeholder" type="string | null" optional>
+      Placeholder text (for URL input mode).
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+**JavaScript:**
+```javascript
+window.jarvis.ipc.on('palette_show', (data) => {
+    // Render command palette UI
+    window._showCommandPalette(
+        data.items,
+        data.query,
+        data.selectedIndex,
+        data.mode,
+        data.placeholder
+    );
+});
+```
+
+**Rust:**
+```rust
+let js = js_dispatch_message("palette_show", &json!({
+    "items": [
+        {
+            "label": "New Terminal",
+            "keybind": "Cmd+T",
+            "category": "Panels"
+        },
+        {
+            "label": "Open Assistant",
+            "keybind": "Cmd+G",
+            "category": "AI"
+        }
+    ],
+    "query": "",
+    "selectedIndex": 0,
+    "mode": "command",
+    "placeholder": null
+}));
+
+handle.eval(&js);
+```
+
+---
+
+#### palette_update
+
+Update the command palette state (search results, selection, etc.).
+
+<ParamField path="event" type="string" default="palette_update">
+  Event name.
+</ParamField>
+
+<ParamField path="payload" type="object">
+  Same structure as `palette_show`.
+</ParamField>
+
+**JavaScript:**
+```javascript
+window.jarvis.ipc.on('palette_update', (data) => {
+    window._updateCommandPalette(
+        data.items,
+        data.query,
+        data.selectedIndex,
+        data.mode,
+        data.placeholder
+    );
+});
+```
+
+**Rust:**
+```rust
+let js = js_dispatch_message("palette_update", &json!({
+    "items": filtered_items,
+    "query": "new",
+    "selectedIndex": 0,
+    "mode": "command",
+    "placeholder": null
+}));
+
+handle.eval(&js);
+```
+
+---
+
+#### palette_hide
+
+Hide the command palette.
+
+<ParamField path="event" type="string" default="palette_hide">
+  Event name.
+</ParamField>
+
+<ParamField path="payload" type="{}">
+  Empty object.
+</ParamField>
+
+**JavaScript:**
+```javascript
+window.jarvis.ipc.on('palette_hide', () => {
+    window._hideCommandPalette();
+});
+```
+
+**Rust:**
+```rust
+let js = js_dispatch_message("palette_hide", &json!({}));
+handle.eval(&js);
+```
+
+---
+
+### Configuration
+
+#### config_updated
+
+Notify WebView that configuration has changed.
+
+<ParamField path="event" type="string" default="config_updated">
+  Event name.
+</ParamField>
+
+<ParamField path="payload" type="object">
+  New configuration (partial or full).
+</ParamField>
+
+**JavaScript:**
+```javascript
+window.jarvis.ipc.on('config_updated', (config) => {
+    // Update theme
+    if (config.theme) {
+        applyTheme(config.theme);
+    }
+    
+    // Update colors
+    if (config.colors) {
+        updateColors(config.colors);
+    }
+});
+```
+
+**Rust:**
+```rust
+let js = js_dispatch_message("config_updated", &json!({
+    "theme": {
+        "name": "tokyo-night"
+    },
+    "colors": {
+        "primary": "#7aa2f7",
+        "background": "#1a1b26"
+    }
+}));
+
+handle.eval(&js);
+```
+
+---
+
+### Terminal Output
+
+#### terminal_output
+
+Send terminal output to xterm.js.
+
+<ParamField path="event" type="string" default="terminal_output">
+  Event name.
+</ParamField>
+
+<ParamField path="payload" type="object">
+  <ParamField path="data" type="string" required>
+    Terminal output data (ANSI escaped).
+  </ParamField>
+</ParamField>
+
+**JavaScript:**
+```javascript
+window.jarvis.ipc.on('terminal_output', (payload) => {
+    if (window._xtermInstance) {
+        window._xtermInstance.write(payload.data);
+    }
+});
+```
+
+**Rust:**
+```rust
+let js = js_dispatch_message("terminal_output", &json!({
+    "data": "\x1b[32mHello, World!\x1b[0m\r\n"
+}));
+
+handle.eval(&js);
+```
+
+---
+
+### AI Assistant
+
+#### assistant_message
+
+AI assistant sent a message.
+
+<ParamField path="event" type="string" default="assistant_message">
+  Event name.
+</ParamField>
+
+<ParamField path="payload" type="object">
+  <ParamField path="role" type="string" required>
+    Message role: `"user"`, `"assistant"`, or `"system"`.
+  </ParamField>
+  
+  <ParamField path="content" type="string" required>
+    Message content.
+  </ParamField>
+  
+  <ParamField path="streaming" type="bool" optional>
+    Whether this is a streaming chunk.
+  </ParamField>
+</ParamField>
+
+**JavaScript:**
+```javascript
+window.jarvis.ipc.on('assistant_message', (msg) => {
+    if (msg.streaming) {
+        // Append to current message
+        appendToLastMessage(msg.content);
+    } else {
+        // Add complete message
+        addMessage(msg.role, msg.content);
+    }
+});
+```
+
+**Rust:**
+```rust
+let js = js_dispatch_message("assistant_message", &json!({
+    "role": "assistant",
+    "content": "Hello! How can I help you?",
+    "streaming": false
+}));
+
+handle.eval(&js);
+```
+
+---
+
+### Presence
+
+#### presence_update
+
+User presence changed.
+
+<ParamField path="event" type="string" default="presence_update">
+  Event name.
+</ParamField>
+
+<ParamField path="payload" type="object">
+  <ParamField path="users" type="array" required>
+    Array of online users.
+    
+    Each user:
+    ```json
+    {
+      "user_id": "user_123",
+      "display_name": "Alice",
+      "status": "online",
+      "activity": "Playing Wordle"
+    }
+    ```
+  </ParamField>
+</ParamField>
+
+**JavaScript:**
+```javascript
+window.jarvis.ipc.on('presence_update', (data) => {
+    updateUserList(data.users);
+});
+```
+
+---
+
+## Custom Events
+
+You can send custom events from Rust to JavaScript:
+
+**Rust:**
+```rust
+let js = js_dispatch_message("my_custom_event", &json!({
+    "message": "Something happened!",
+    "data": { "foo": "bar" }
+}));
+
+handle.eval(&js);
+```
+
+**JavaScript:**
+```javascript
+window.jarvis.ipc.on('my_custom_event', (payload) => {
+    console.log('Custom event:', payload.message);
+    console.log('Data:', payload.data);
+});
+```
+
+## Event Patterns
+
+### Fire-and-Forget
+
+Simple one-way events:
+
+```rust
+let js = js_dispatch_message("notification", &json!({
+    "title": "Build Complete",
+    "message": "Your project built successfully"
+}));
+
+handle.eval(&js);
+```
+
+### Request-Response
+
+For events that need a response, include a request ID:
+
+**Rust (send request):**
+```rust
+let req_id = generate_request_id();
+
+let js = js_dispatch_message("get_selection", &json!({
+    "_reqId": req_id
+}));
+
+handle.eval(&js);
+
+// Wait for response via IPC message with matching _reqId
+```
+
+**JavaScript (send response):**
+```javascript
+window.jarvis.ipc.on('get_selection', (payload) => {
+    const selection = window.getSelection().toString();
+    
+    window.jarvis.ipc.send('response', {
+        _reqId: payload._reqId,
+        result: { text: selection }
+    });
+});
+```
+
+### Streaming Events
+
+For streaming data (AI responses, file downloads, etc.):
+
+**Rust:**
+```rust
+// Start stream
+let js = js_dispatch_message("stream_start", &json!({
+    "id": "stream_123"
+}));
+handle.eval(&js);
+
+// Send chunks
+for chunk in chunks {
+    let js = js_dispatch_message("stream_chunk", &json!({
+        "id": "stream_123",
+        "data": chunk
+    }));
+    handle.eval(&js);
+}
+
+// End stream
+let js = js_dispatch_message("stream_end", &json!({
+    "id": "stream_123"
+}));
+handle.eval(&js);
+```
+
+**JavaScript:**
+```javascript
+const streams = new Map();
+
+window.jarvis.ipc.on('stream_start', (payload) => {
+    streams.set(payload.id, { buffer: '' });
+});
+
+window.jarvis.ipc.on('stream_chunk', (payload) => {
+    const stream = streams.get(payload.id);
+    if (stream) {
+        stream.buffer += payload.data;
+        renderStreamContent(stream.buffer);
+    }
+});
+
+window.jarvis.ipc.on('stream_end', (payload) => {
+    streams.delete(payload.id);
+});
+```
+
+## See Also
+
+- [IPC Messages](/api/ipc-messages) — JavaScript to Rust messages
+- [`jarvis-webview`](/api/jarvis-webview) — WebView API reference

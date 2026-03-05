@@ -1,0 +1,501 @@
+---
+title: 'IPC Bridge API'
+description: 'Complete reference for communicating between plugins and the Jarvis backend'
+---
+
+Every webview in Jarvis — including your plugins — gets `window.jarvis.ipc` injected automatically. This is your communication channel to the Rust backend, enabling clipboard access, file reading, panel management, and more.
+
+## Core API
+
+The IPC bridge provides three core methods for communication:
+
+```javascript
+// Send a fire-and-forget message to Rust
+window.jarvis.ipc.send(kind, payload);
+
+// Listen for messages from Rust
+window.jarvis.ipc.on(kind, callback);
+
+// Send a request and await a response (returns a Promise)
+const result = await window.jarvis.ipc.request(kind, payload);
+```
+
+### Checking Bridge Availability
+
+The bridge is available as soon as your script runs. There is no `DOMContentLoaded` race because the initialization script runs before your page's scripts.
+
+```javascript
+if (window.jarvis && window.jarvis.ipc) {
+  // IPC bridge is ready
+  window.jarvis.ipc.send('ping', {});
+}
+```
+
+## Sending Messages to Rust
+
+### ipc.send(kind, payload)
+
+Fire-and-forget message sending. Use this for operations that don't need a response.
+
+```javascript
+// Copy text to the system clipboard
+window.jarvis.ipc.send('clipboard_copy', { text: 'Hello from my plugin!' });
+
+// Navigate to a URL in the current pane
+window.jarvis.ipc.send('open_url', { url: 'https://example.com' });
+
+// Send a ping (Rust will reply with 'pong')
+window.jarvis.ipc.send('ping', {});
+```
+
+**Implementation Details:**
+
+Internally, `send` serializes `{ kind, payload }` as JSON and posts it via `window.ipc.postMessage`. The Rust IPC handler validates the message against a strict allowlist before processing.
+
+<Tip>
+The `payload` parameter can be any JSON-serializable object. Use `{}` for messages that don't need data.
+</Tip>
+
+## Receiving Messages from Rust
+
+### ipc.on(kind, callback)
+
+Register a handler for messages sent from Rust to your webview.
+
+```javascript
+// Listen for pong responses
+window.jarvis.ipc.on('pong', (payload) => {
+  console.log('Got pong:', payload);
+});
+
+// Listen for theme changes (broadcast to all webviews)
+window.jarvis.ipc.on('theme_update', (payload) => {
+  applyTheme(payload);
+});
+```
+
+**Registration Rules:**
+
+- You can register one handler per message kind
+- Calling `on` again for the same kind replaces the previous handler
+- The callback receives the payload object as its argument
+
+## Request-Response Pattern
+
+### ipc.request(kind, payload) → Promise
+
+For operations that need a result back from Rust. Uses an internal request ID and has a **10-second timeout**.
+
+```javascript
+// Read the clipboard (request-response)
+try {
+  const result = await window.jarvis.ipc.request('clipboard_paste', {});
+  if (result.kind === 'text') {
+    console.log('Clipboard text:', result.text);
+  } else if (result.kind === 'image') {
+    console.log('Clipboard image data URL:', result.data_url);
+  }
+} catch (err) {
+  console.error('Clipboard read failed:', err);
+}
+```
+
+### How It Works
+
+<Steps>
+  <Step title="Assign request ID">
+    JavaScript calls `request(kind, payload)`. The bridge assigns `payload._reqId = N` (incrementing integer).
+  </Step>
+
+  <Step title="Send message">
+    The message is sent to Rust via `send`.
+  </Step>
+
+  <Step title="Rust processes request">
+    Rust processes the request and sends a response IPC message back to the webview, including `_reqId: N` in the payload.
+  </Step>
+
+  <Step title="Resolve promise">
+    The bridge's augmented `_dispatch` function checks incoming messages for `_reqId`. If found, it resolves (or rejects, if `payload.error` is present) the matching pending Promise.
+  </Step>
+
+  <Step title="Timeout handling">
+    If no response arrives within 10 seconds, the Promise rejects with `Error('IPC request timeout')`.
+  </Step>
+</Steps>
+
+<Tip>
+If no `_reqId` match is found, the message is passed to the regular `on` handler.
+</Tip>
+
+## Available IPC Messages
+
+### Messages You Can Send (JS → Rust)
+
+<CodeGroup>
+```javascript Clipboard
+// Copy text to clipboard
+window.jarvis.ipc.send('clipboard_copy', { text: 'Hello!' });
+
+// Read from clipboard (request-response)
+const result = await window.jarvis.ipc.request('clipboard_paste', {});
+// Returns: { kind: 'text', text: '...' } or { kind: 'image', data_url: '...' }
+```
+
+```javascript Navigation
+// Navigate current pane to URL
+window.jarvis.ipc.send('open_url', { url: 'https://example.com' });
+
+// Launch built-in game
+window.jarvis.ipc.send('launch_game', { game: 'tetris' });
+```
+
+```javascript Panels
+// Open new panel
+window.jarvis.ipc.send('open_panel', { kind: 'terminal' });
+
+// Close current panel (won't close the last one)
+window.jarvis.ipc.send('panel_close', {});
+
+// Open settings panel
+window.jarvis.ipc.send('open_settings', {});
+```
+
+```javascript File System
+// Read file from disk (request-response)
+// Supports image files only (PNG, JPEG, GIF, WebP, BMP), max 5 MB
+const result = await window.jarvis.ipc.request('read_file', { path: '~/image.png' });
+// Returns: { data_url: 'data:image/png;base64,...' } or { error: '...' }
+```
+
+```javascript Terminal
+// Send input to terminal PTY
+window.jarvis.ipc.send('pty_input', { data: 'ls -la\n' });
+
+// Resize terminal
+window.jarvis.ipc.send('pty_resize', { cols: 80, rows: 24 });
+```
+
+```javascript System
+// Health check
+window.jarvis.ipc.send('ping', {});
+// Rust replies with 'pong'
+
+// Start window drag (for custom titlebars)
+window.jarvis.ipc.send('window_drag', {});
+
+// Simulate keybind
+window.jarvis.ipc.send('keybind', {
+  key: 'T',
+  ctrl: false,
+  alt: false,
+  shift: false,
+  meta: true
+});
+
+// Log debug event to Rust
+window.jarvis.ipc.send('debug_event', {
+  type: 'my_plugin_state',
+  data: { count: 42 }
+});
+```
+</CodeGroup>
+
+### Complete Message Reference
+
+| Kind | Payload | Type | Description |
+|------|---------|------|-------------|
+| `ping` | `{}` | send | Health check. Rust replies with `pong`. |
+| `clipboard_copy` | `{ text: string }` | send | Copy text to system clipboard. |
+| `clipboard_paste` | `{}` | request | Read clipboard contents. Returns `{ kind, text?, data_url? }`. |
+| `open_url` | `{ url: string }` | send | Navigate current pane to URL. URLs without scheme get `https://` prepended. |
+| `launch_game` | `{ game: string }` | send | Launch built-in game in current pane. |
+| `open_settings` | `{}` | send | Open Settings panel. |
+| `open_panel` | `{ kind: string }` | send | Open new panel of given kind (e.g., "terminal"). |
+| `panel_close` | `{}` | send | Close current panel (won't close last one). |
+| `read_file` | `{ path: string }` | request | Read image file from disk. Returns `{ data_url }` or `{ error }`. Max 5 MB, images only. Supports `~/` expansion. |
+| `pty_input` | `{ data: string }` | send | Send input to terminal PTY (if this pane has one). |
+| `pty_resize` | `{ cols: number, rows: number }` | send | Resize terminal PTY. |
+| `keybind` | `{ key, ctrl, alt, shift, meta }` | send | Simulate keybind press. |
+| `window_drag` | `{}` | send | Start dragging the window. |
+| `debug_event` | `{ type: string, ...data }` | send | Log structured data to Rust `tracing::info!` output. |
+
+### Messages You Can Receive (Rust → JS)
+
+| Kind | Payload | When |
+|------|---------|------|
+| `pong` | `"pong"` | After you send `ping` |
+| `palette_show` | `{ items, query, selectedIndex, mode, placeholder }` | Command palette opens (handled automatically by injected script) |
+| `palette_update` | `{ items, query, selectedIndex, mode, placeholder }` | Command palette state changes |
+| `palette_hide` | `{}` | Command palette closes |
+
+<Tip>
+The palette messages are handled by the injected command palette overlay system. You don't need to handle them in your plugin unless you want to customize palette behavior.
+</Tip>
+
+## Keyboard and Input Handling
+
+### How Keyboard Events Work
+
+Keyboard events in plugins follow a layered interception model:
+
+<Steps>
+  <Step title="Overlay mode">
+    When the command palette or assistant is open, ALL keyboard input is captured by the overlay. Your plugin receives no key events during this time.
+  </Step>
+
+  <Step title="Command keys">
+    Most Cmd/Ctrl+key combinations are intercepted by the IPC bridge's capture-phase `keydown` listener and forwarded to Rust as `keybind` messages. This is how Cmd+T (new pane), Cmd+W (close pane), etc. work even when a plugin is focused.
+  </Step>
+
+  <Step title="Escape key">
+    Always forwarded to Rust. If the pane is showing a plugin (tracked in `game_active`), Escape navigates back to the previous page.
+  </Step>
+
+  <Step title="Normal mode">
+    All other keyboard input goes to your plugin's webview normally. Standard HTML elements like `<input>`, `<textarea>`, and custom key handlers work as expected.
+  </Step>
+</Steps>
+
+### Keys That Pass Through
+
+These Cmd+key combinations are NOT intercepted and reach your plugin normally:
+
+- `Cmd+R` / `Ctrl+R` — useful for refreshing the plugin during development
+- `Cmd+L` / `Ctrl+L`
+- `Cmd+Q` / `Ctrl+Q`
+- `Cmd+A` / `Ctrl+A` — select all
+- `Cmd+X` / `Ctrl+X` — cut
+- `Cmd+Z` / `Ctrl+Z` — undo
+
+### Handling Escape in Your Plugin
+
+If your plugin has modal dialogs or internal states that should close on Escape, handle it before the IPC bridge does:
+
+```javascript
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    if (myModalIsOpen) {
+      closeMyModal();
+      e.stopPropagation();  // Attempt to prevent bridge from forwarding
+      return;
+    }
+    // Otherwise, Escape navigates back to the previous page
+  }
+});
+```
+
+<Tip>
+`e.stopPropagation()` may not prevent the bridge from seeing Escape in all cases, since the bridge uses a capture-phase listener. Structure your plugin so that Escape-to-exit is acceptable behavior.
+</Tip>
+
+## Security and Validation
+
+### IPC Allowlist
+
+All IPC messages from JavaScript are validated against a strict allowlist before processing. Only these `kind` values are accepted:
+
+```
+pty_input          pty_resize        pty_restart       terminal_ready
+panel_focus        presence_request_users              presence_poke
+settings_init      settings_set_theme                  settings_update
+settings_reset_section               settings_get_config
+assistant_input    assistant_ready
+open_panel         panel_close       panel_toggle      open_settings
+status_bar_init    launch_game
+ping               boot_complete     crypto            window_drag
+keybind            read_file
+clipboard_copy     clipboard_paste   open_url
+palette_click      palette_hover     palette_dismiss
+debug_event
+```
+
+Any message with a `kind` not in this list is **silently dropped** with a warning log:
+
+```
+IPC message rejected: unknown kind (pane_id: 1, kind: "exec")
+```
+
+<Tip>
+The allowlist check is case-sensitive. `"PTY_INPUT"` is rejected. Injection attempts like `"ping; rm -rf /"` are also rejected.
+</Tip>
+
+### Message Validation
+
+The IPC handler validates that:
+
+1. The raw message body is valid JSON
+2. The message contains a `kind` field
+3. The `kind` is in the allowlist
+4. The payload is properly structured
+
+## Common Patterns
+
+### Persistent Data Storage
+
+```javascript
+// Save data to localStorage
+localStorage.setItem('my-plugin:data', JSON.stringify(myData));
+
+// Load data from localStorage
+const myData = JSON.parse(localStorage.getItem('my-plugin:data') || '{}');
+```
+
+<Tip>
+Always namespace your keys with your plugin ID. All plugins share the same `jarvis://localhost` localStorage origin.
+</Tip>
+
+### Clipboard Operations
+
+```javascript
+// Copy text to clipboard
+function copyToClipboard(text) {
+  window.jarvis.ipc.send('clipboard_copy', { text });
+}
+
+// Read from clipboard (async)
+async function readClipboard() {
+  const result = await window.jarvis.ipc.request('clipboard_paste', {});
+  return result?.text || '';
+}
+```
+
+### Reading Image Files
+
+```javascript
+async function readImageFile(path) {
+  try {
+    const result = await window.jarvis.ipc.request('read_file', { path });
+    if (result.error) {
+      console.error('Failed to read file:', result.error);
+      return null;
+    }
+    // result.data_url contains a base64 data URL
+    return result.data_url;
+  } catch (err) {
+    console.error('Read file request failed:', err);
+    return null;
+  }
+}
+```
+
+<Tip>
+`read_file` only supports image files (PNG, JPEG, GIF, WebP, BMP) with a maximum size of 5 MB. Supports `~/` expansion.
+</Tip>
+
+### Opening Panels
+
+```javascript
+// Open a new terminal pane
+window.jarvis.ipc.send('open_panel', { kind: 'terminal' });
+
+// Close the current panel
+window.jarvis.ipc.send('panel_close', {});
+```
+
+### Inter-Plugin Communication
+
+Plugins share the same `localStorage` namespace. You can use this as a simple message bus:
+
+```javascript
+// Plugin A: send a message
+localStorage.setItem('plugin-bus:message', JSON.stringify({
+  from: 'plugin-a',
+  type: 'data-updated',
+  timestamp: Date.now()
+}));
+
+// Plugin B: listen for messages
+window.addEventListener('storage', (e) => {
+  if (e.key === 'plugin-bus:message') {
+    const msg = JSON.parse(e.newValue);
+    console.log('Got message from', msg.from, msg.type);
+  }
+});
+```
+
+<Tip>
+`storage` events only fire in other windows/tabs, not the one that made the change. Since plugins in different panes run in different webviews, this works for cross-pane communication.
+</Tip>
+
+## Debugging
+
+### Ping/Pong Test
+
+Verify the IPC bridge is working:
+
+```javascript
+window.jarvis.ipc.on('pong', () => console.log('IPC bridge works!'));
+window.jarvis.ipc.send('ping', {});
+```
+
+### Debug Events
+
+Send structured debug events to the Rust log:
+
+```javascript
+window.jarvis.ipc.send('debug_event', {
+  type: 'my_plugin_state',
+  data: { count: 42, status: 'running' }
+});
+```
+
+These appear in the Jarvis log output as `tracing::info!` entries:
+
+```
+[JS] webview event (pane_id: 1, event: {"type":"my_plugin_state","data":{"count":42,"status":"running"}})
+```
+
+### Built-in Diagnostic Logging
+
+The IPC bridge automatically sends diagnostic events for certain DOM events:
+
+- `mousedown` events (with coordinates and target element)
+- `keydown` events (with key, code, and modifier state)
+- `focus` and `blur` events
+
+These are sent as `debug_event` IPC messages by the initialization script and appear in the Rust log during development.
+
+## Implementation Details
+
+### IPC Initialization Script
+
+The IPC bridge is injected as an initialization script (`IPC_INIT_SCRIPT`) that runs before any page scripts. This ensures `window.jarvis.ipc` is available immediately.
+
+**The initialization script provides:**
+
+- `window.jarvis.ipc.send()` — fire-and-forget messaging
+- `window.jarvis.ipc.on()` — message handler registration
+- `window.jarvis.ipc.request()` — request-response pattern
+- Command palette overlay system
+- Keyboard shortcut forwarder
+- Clipboard API polyfill
+- Diagnostic event logging
+
+### Message Format
+
+Messages sent from JavaScript to Rust have this structure:
+
+```javascript
+{
+  kind: "clipboard_copy",
+  payload: { text: "Hello!" }
+}
+```
+
+Messages sent from Rust to JavaScript are dispatched via:
+
+```javascript
+window.jarvis.ipc._dispatch(kind, payload);
+```
+
+### Request-Response Internals
+
+The request-response pattern works by:
+
+1. Assigning a unique `_reqId` to the payload
+2. Storing a `{ resolve, reject }` Promise in `_pendingRequests`
+3. Setting a 10-second timeout
+4. Matching incoming messages by `_reqId` and resolving/rejecting accordingly
+
+This allows multiple concurrent requests without response mixing.

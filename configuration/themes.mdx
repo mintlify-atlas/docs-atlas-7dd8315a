@@ -1,0 +1,440 @@
+---
+title: Theme System
+description: Customize Jarvis appearance with built-in themes or create your own custom themes
+---
+
+## Overview
+
+Themes let you change the visual appearance of Jarvis without editing individual color/font/effect fields. A theme is a file that specifies overrides to the default configuration.
+
+<Info>
+Themes use the `ThemeOverrides` structure. All sections are optional—only the fields you specify will override the defaults.
+</Info>
+
+## Built-in Themes
+
+Jarvis ships with **8 built-in themes**:
+
+<CardGroup cols={2}>
+  <Card title="jarvis-dark" icon="moon">
+    Default dark theme (Catppuccin Mocha palette)
+  </Card>
+  
+  <Card title="jarvis-light" icon="sun">
+    Light theme variant
+  </Card>
+  
+  <Card title="catppuccin-mocha" icon="mug-hot">
+    Catppuccin Mocha community theme
+  </Card>
+  
+  <Card title="dracula" icon="bat">
+    Dracula color scheme
+  </Card>
+  
+  <Card title="gruvbox-dark" icon="palette">
+    Gruvbox dark palette
+  </Card>
+  
+  <Card title="nord" icon="snowflake">
+    Nord arctic color palette
+  </Card>
+  
+  <Card title="solarized-dark" icon="circle-half-stroke">
+    Solarized dark
+  </Card>
+  
+  <Card title="tokyo-night" icon="city">
+    Tokyo Night colors
+  </Card>
+</CardGroup>
+
+### Using a Built-in Theme
+
+```toml config.toml
+[theme]
+name = "dracula"
+```
+
+## Custom Themes
+
+Custom themes can be YAML or TOML files. Set `theme.name` to either:
+
+- A theme name (looked up in theme search paths)
+- A direct file path (e.g., `/path/to/my-theme.yaml`)
+
+### Theme Search Paths
+
+Themes are resolved in this priority order:
+
+<Steps>
+  <Step title="User config directory">
+    `~/.config/jarvis/themes/`
+  </Step>
+  
+  <Step title="Relative to executable">
+    `<exe_dir>/resources/themes/`
+  </Step>
+  
+  <Step title="Current working directory">
+    `./resources/themes/`
+  </Step>
+</Steps>
+
+<Note>
+For each directory, the following extensions are tried: `.toml`, `.yaml`, `.yml`.
+
+If the theme `name` contains a `/` or ends in `.yaml`, `.yml`, or `.toml`, it is treated as a direct file path.
+</Note>
+
+## Theme File Format
+
+### YAML Theme Example
+
+```yaml my-theme.yaml
+name: my-theme
+colors:
+  primary: "#ff6b6b"
+  secondary: "#4ecdc4"
+  background: "#0d1117"
+  panel_bg: "rgba(13,17,23,0.9)"
+  text: "#e6edf3"
+  text_muted: "#7d8590"
+  border: "#21262d"
+  border_focused: "rgba(255,107,107,0.15)"
+  success: "#3fb950"
+  warning: "#d29922"
+  error: "#f85149"
+font:
+  family: "JetBrains Mono"
+  size: 14
+  ligatures: true
+  nerd_font: true
+  font_weight: 400
+visualizer:
+  orb_color: "#ff6b6b"
+  orb_secondary_color: "#4ecdc4"
+background:
+  hex_grid_color: "#ff6b6b"
+  solid_color: "#0d1117"
+effects:
+  scanline_intensity: 0.05
+  bloom_intensity: 1.0
+  glow_color: "#ff6b6b"
+  glow_width: 2.0
+terminal:
+  cursor_style: beam
+  cursor_blink: true
+window:
+  opacity: 0.95
+  blur: true
+```
+
+### TOML Theme Example
+
+```toml my-theme.toml
+name = "my-theme"
+
+[colors]
+primary = "#ff6b6b"
+background = "#0d1117"
+text = "#e6edf3"
+
+[font]
+family = "Fira Code"
+size = 14
+
+[effects]
+scanline_intensity = 0.05
+
+[window]
+opacity = 0.9
+```
+
+## Overridable Theme Sections
+
+### Colors Section
+
+<ParamField path="colors.primary" type="string" default="#cba6f7">
+  Primary accent color (Mauve)
+</ParamField>
+
+<ParamField path="colors.secondary" type="string" default="#f5c2e7">
+  Secondary accent color (Pink)
+</ParamField>
+
+<ParamField path="colors.background" type="string" default="#1e1e2e">
+  Main background color (Base)
+</ParamField>
+
+<ParamField path="colors.panel_bg" type="string" default="rgba(30,30,46,0.88)">
+  Panel background with alpha
+</ParamField>
+
+<ParamField path="colors.text" type="string" default="#cdd6f4">
+  Primary text color
+</ParamField>
+
+<ParamField path="colors.text_muted" type="string" default="#6c7086">
+  Muted/secondary text color (Overlay0)
+</ParamField>
+
+<ParamField path="colors.border" type="string" default="#181825">
+  Border color (Mantle)
+</ParamField>
+
+<ParamField path="colors.border_focused" type="string" default="rgba(203,166,247,0.15)">
+  Focused panel border glow
+</ParamField>
+
+<ParamField path="colors.success" type="string" default="#a6e3a1">
+  Success state color (Green)
+</ParamField>
+
+<ParamField path="colors.warning" type="string" default="#f9e2af">
+  Warning state color (Yellow)
+</ParamField>
+
+<ParamField path="colors.error" type="string" default="#f38ba8">
+  Error state color (Red)
+</ParamField>
+
+### Font Section
+
+<ParamField path="font.family" type="string" default="Menlo">
+  Terminal/code font family
+</ParamField>
+
+<ParamField path="font.size" type="u32" default={13}>
+  Font size in points (valid range: **8–32**)
+</ParamField>
+
+<ParamField path="font.title_size" type="u32" default={14}>
+  Title font size in points (valid range: **8–48**)
+</ParamField>
+
+<ParamField path="font.line_height" type="f64" default={1.6}>
+  Line height multiplier (valid range: **1.0–3.0**)
+</ParamField>
+
+<ParamField path="font.nerd_font" type="bool" default={true}>
+  Enable Nerd Font glyph rendering
+</ParamField>
+
+<ParamField path="font.ligatures" type="bool" default={false}>
+  Enable font ligatures (e.g., `->`, `=>`)
+</ParamField>
+
+<ParamField path="font.font_weight" type="u32" default={400}>
+  Font weight for normal text (valid range: **100–900**)
+</ParamField>
+
+<ParamField path="font.bold_weight" type="u32" default={700}>
+  Font weight for bold text (valid range: **100–900**)
+</ParamField>
+
+### Visualizer Section
+
+<ParamField path="visualizer.orb_color" type="string" default="#00d4ff">
+  Primary orb color
+</ParamField>
+
+<ParamField path="visualizer.orb_secondary_color" type="string" default="#0088aa">
+  Secondary orb color
+</ParamField>
+
+### Background Section
+
+<ParamField path="background.hex_grid_color" type="string" default="#00d4ff">
+  Hex grid line color
+</ParamField>
+
+<ParamField path="background.solid_color" type="string" default="#000000">
+  Solid color when `mode = "solid"`
+</ParamField>
+
+### Effects Section
+
+<ParamField path="effects.scanline_intensity" type="f32" default={0.08}>
+  Scanline darkness intensity (valid range: **0.0–1.0**)
+</ParamField>
+
+<ParamField path="effects.vignette_intensity" type="f32" default={1.2}>
+  Vignette strength (valid range: **0.0–3.0**)
+</ParamField>
+
+<ParamField path="effects.bloom_intensity" type="f32" default={0.9}>
+  Bloom brightness multiplier (valid range: **0.0–3.0**)
+</ParamField>
+
+<ParamField path="effects.glow_color" type="string" default="#cba6f7">
+  Glow color (hex)
+</ParamField>
+
+<ParamField path="effects.glow_width" type="f32" default={2.0}>
+  Glow width in pixels (valid range: **0.0–10.0**)
+</ParamField>
+
+### Terminal Section
+
+<ParamField path="terminal.cursor_style" type="string" default="block">
+  Cursor visual style: `block`, `underline`, `beam`
+</ParamField>
+
+<ParamField path="terminal.cursor_blink" type="bool" default={true}>
+  Enable cursor blinking
+</ParamField>
+
+### Window Section
+
+<ParamField path="window.opacity" type="f64" default={1.0}>
+  Window-level opacity (valid range: **0.0–1.0**)
+</ParamField>
+
+<ParamField path="window.blur" type="bool" default={false}>
+  Enable macOS vibrancy / background blur
+</ParamField>
+
+## Creating a Custom Theme
+
+<Steps>
+  <Step title="Choose a format">
+    Create a `.yaml` or `.toml` file in `~/.config/jarvis/themes/`
+  </Step>
+  
+  <Step title="Define overrides">
+    Add only the fields you want to change from the defaults
+  </Step>
+  
+  <Step title="Apply the theme">
+    Set `theme.name` in your `config.toml` to your theme filename (without extension)
+  </Step>
+  
+  <Step title="Test and iterate">
+    Save the config and Jarvis will hot-reload with your new theme
+  </Step>
+</Steps>
+
+### Example: Creating a GitHub Dark Theme
+
+<CodeGroup>
+
+```yaml github-dark.yaml
+name: github-dark
+colors:
+  primary: "#58a6ff"
+  secondary: "#f78166"
+  background: "#0d1117"
+  panel_bg: "rgba(22,27,34,0.9)"
+  text: "#e6edf3"
+  text_muted: "#7d8590"
+  border: "#30363d"
+  border_focused: "rgba(88,166,255,0.2)"
+  success: "#3fb950"
+  warning: "#d29922"
+  error: "#f85149"
+font:
+  family: "SF Mono"
+  size: 13
+  ligatures: false
+effects:
+  scanline_intensity: 0.03
+  bloom_intensity: 0.7
+  glow_color: "#58a6ff"
+window:
+  opacity: 0.98
+  blur: true
+```
+
+```toml config.toml
+[theme]
+name = "github-dark"
+```
+
+</CodeGroup>
+
+## Theme Preview Colors
+
+For theme selection UI, you can include preview colors in your theme file:
+
+```yaml
+name: my-theme
+preview_colors:
+  primary: "#ff6b6b"
+  background: "#0d1117"
+  text: "#e6edf3"
+```
+
+## Theme Constants
+
+The following theme names are built-in:
+
+```rust
+pub const BUILT_IN_THEMES: &[&str] = &[
+    "jarvis-dark",
+    "jarvis-light",
+    "catppuccin-mocha",
+    "dracula",
+    "gruvbox-dark",
+    "nord",
+    "solarized-dark",
+    "tokyo-night",
+];
+```
+
+## Advanced: Theme API
+
+### Loading a Theme Programmatically
+
+```rust
+use jarvis_config::theme::{load_theme, apply_theme};
+
+let mut config = load_config()?;
+let overrides = load_theme("dracula")?;
+apply_theme(&mut config, &overrides);
+```
+
+### Theme Structure
+
+```rust
+pub struct ThemeOverrides {
+    pub name: Option<String>,
+    pub colors: Option<ColorConfig>,
+    pub font: Option<ThemeFontOverrides>,
+    pub visualizer: Option<ThemeVisualizerOverrides>,
+    pub background: Option<ThemeBackgroundOverrides>,
+    pub effects: Option<ThemeEffectsOverrides>,
+    pub terminal: Option<ThemeTerminalOverrides>,
+    pub window: Option<ThemeWindowOverrides>,
+}
+```
+
+<Note>
+All fields are `Option<T>`, so you only need to specify the fields you want to override.
+</Note>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Theme not loading">
+    Check the following:
+    - Theme file exists in one of the search paths
+    - File extension is `.yaml`, `.yml`, or `.toml`
+    - YAML/TOML syntax is valid
+    - Check logs for theme loading errors
+  </Accordion>
+  
+  <Accordion title="Colors not changing">
+    Ensure:
+    - Color values are valid CSS color strings (hex or rgba)
+    - Theme is applied after config loads
+    - Hot reload triggered (save config.toml)
+  </Accordion>
+  
+  <Accordion title="Validation errors">
+    Theme overrides must respect validation rules:
+    - Font sizes: 8–32 (regular), 8–48 (title)
+    - Opacity values: 0.0–1.0
+    - Effects intensities: 0.0–3.0
+  </Accordion>
+</AccordionGroup>

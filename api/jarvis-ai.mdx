@@ -1,0 +1,376 @@
+---
+title: 'jarvis-ai'
+description: 'AI engine — Claude, Gemini, and Whisper API clients with streaming and tool calling'
+---
+
+## Overview
+
+The `jarvis-ai` crate provides AI capabilities for Jarvis:
+
+- Claude and Gemini API clients with streaming support
+- Whisper API for speech-to-text
+- Session management with automatic tool-call loops
+- Token usage tracking
+- Skill-based routing between providers
+
+## Core Trait
+
+### AiClient
+
+The main trait for AI providers.
+
+```rust
+use jarvis_ai::{AiClient, Message, ToolDefinition, AiResponse, AiError};
+use async_trait::async_trait;
+
+#[async_trait]
+pub trait AiClient: Send + Sync {
+    async fn send_message(
+        &self,
+        messages: &[Message],
+        tools: &[ToolDefinition],
+    ) -> Result<AiResponse, AiError>;
+
+    async fn send_message_streaming(
+        &self,
+        messages: &[Message],
+        tools: &[ToolDefinition],
+        on_chunk: Box<dyn Fn(String) + Send + Sync>,
+    ) -> Result<AiResponse, AiError>;
+}
+```
+
+## Data Types
+
+### Message
+
+A message in a conversation.
+
+<ResponseField name="Message" type="struct">
+  <Expandable title="Fields">
+    <ResponseField name="role" type="Role" required>
+      Who sent the message.
+      
+      Valid values:
+      - `User` — User input
+      - `Assistant` — AI response
+      - `System` — System prompt
+      - `Tool` — Tool execution result
+    </ResponseField>
+    
+    <ResponseField name="content" type="string" required>
+      Message content (text or JSON).
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### ToolDefinition
+
+Defines a tool that the AI can call.
+
+<ResponseField name="ToolDefinition" type="struct">
+  <Expandable title="Fields">
+    <ResponseField name="name" type="string" required>
+      Tool name (e.g., `read_file`, `run_bash`).
+    </ResponseField>
+    
+    <ResponseField name="description" type="string" required>
+      Human-readable description of what the tool does.
+    </ResponseField>
+    
+    <ResponseField name="parameters" type="serde_json::Value" required>
+      JSON Schema for tool parameters.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### AiResponse
+
+Response from an AI API call.
+
+<ResponseField name="AiResponse" type="struct">
+  <Expandable title="Fields">
+    <ResponseField name="content" type="string" required>
+      AI-generated text response.
+    </ResponseField>
+    
+    <ResponseField name="tool_calls" type="Vec<ToolCall>" required>
+      Tools the AI wants to call (may be empty).
+    </ResponseField>
+    
+    <ResponseField name="usage" type="TokenUsage" required>
+      Token usage statistics.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### ToolCall
+
+A tool invocation request from the AI.
+
+<ResponseField name="ToolCall" type="struct">
+  <Expandable title="Fields">
+    <ResponseField name="id" type="string" required>
+      Unique ID for this tool call.
+    </ResponseField>
+    
+    <ResponseField name="name" type="string" required>
+      Name of the tool to call.
+    </ResponseField>
+    
+    <ResponseField name="arguments" type="serde_json::Value" required>
+      Tool arguments as JSON.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### TokenUsage
+
+Token usage statistics.
+
+<ResponseField name="TokenUsage" type="struct">
+  <Expandable title="Fields">
+    <ResponseField name="input_tokens" type="u64" required>
+      Tokens in the input (prompt).
+    </ResponseField>
+    
+    <ResponseField name="output_tokens" type="u64" required>
+      Tokens in the output (completion).
+    </ResponseField>
+  </Expandable>
+  
+  Methods:
+  - `total_tokens() -> u64` — Sum of input and output tokens
+</ResponseField>
+
+## Clients
+
+### ClaudeClient
+
+Claude (Anthropic) API client.
+
+```rust
+use jarvis_ai::{ClaudeClient, ClaudeConfig};
+
+let config = ClaudeConfig {
+    api_key: "sk-ant-...".to_string(),
+    model: "claude-3-5-sonnet-20241022".to_string(),
+    max_tokens: 4096,
+};
+
+let client = ClaudeClient::new(config);
+```
+
+### GeminiClient
+
+Google Gemini API client.
+
+```rust
+use jarvis_ai::{GeminiClient, GeminiConfig};
+
+let config = GeminiConfig {
+    api_key: "AIza...".to_string(),
+    model: "gemini-2.0-flash".to_string(),
+};
+
+let client = GeminiClient::new(config);
+```
+
+### WhisperClient
+
+OpenAI Whisper API for speech-to-text.
+
+```rust
+use jarvis_ai::{WhisperClient, WhisperConfig};
+
+let config = WhisperConfig {
+    api_key: "sk-...".to_string(),
+    model: "whisper-1".to_string(),
+};
+
+let client = WhisperClient::new(config);
+let transcript = client.transcribe(&audio_data).await?;
+```
+
+## Session Management
+
+### Session
+
+Manages a conversation with message history and tool execution.
+
+```rust
+use jarvis_ai::Session;
+
+let mut session = Session::new("claude")
+    .with_system_prompt("You are a helpful assistant.")
+    .with_tools(tools)
+    .with_tool_executor(executor)
+    .with_max_tool_rounds(10);
+```
+
+<ParamField path="new" type="fn(impl Into<String>) -> Session">
+  Create a new session with a provider name.
+</ParamField>
+
+<ParamField path="with_system_prompt" type="fn(impl Into<String>) -> Session">
+  Set the system prompt (prepended to every API call).
+</ParamField>
+
+<ParamField path="with_tools" type="fn(Vec<ToolDefinition>) -> Session">
+  Register available tools.
+</ParamField>
+
+<ParamField path="with_tool_executor" type="fn(ToolExecutor) -> Session">
+  Set the tool execution callback.
+  
+  Type: `ToolExecutor = Arc<dyn Fn(&str, &serde_json::Value) -> String + Send + Sync>`
+</ParamField>
+
+<ParamField path="with_max_tool_rounds" type="fn(u32) -> Session">
+  Set maximum tool-call loop iterations to prevent infinite loops.
+</ParamField>
+
+#### Session Methods
+
+```rust
+// Get conversation history
+let messages = session.messages();
+
+// Get token tracker
+let tracker = session.tracker();
+
+// Clear conversation
+session.clear();
+
+// Get message count
+let count = session.message_count();
+```
+
+## Skill Router
+
+Routes AI requests to the appropriate provider based on skill type.
+
+```rust
+use jarvis_ai::{SkillRouter, Provider, Skill};
+use std::sync::Arc;
+
+let mut router = SkillRouter::new();
+
+// Register clients
+router.register_client(Provider::Claude, Arc::new(claude_client));
+router.register_client(Provider::Gemini, Arc::new(gemini_client));
+
+// Register skills
+router.register_skill(Skill {
+    name: "code_assist".to_string(),
+    provider: Provider::Claude,
+    system_prompt: Some("You are an expert programmer.".to_string()),
+});
+
+router.register_skill(Skill {
+    name: "general_chat".to_string(),
+    provider: Provider::Gemini,
+    system_prompt: None,
+});
+
+// Route a message
+let response = router.route(
+    "code_assist",
+    &messages,
+    &tools
+).await?;
+```
+
+<ResponseField name="Provider" type="enum">
+  AI provider selection.
+  
+  - `Claude` — Anthropic Claude
+  - `Gemini` — Google Gemini
+</ResponseField>
+
+<ResponseField name="Skill" type="struct">
+  <Expandable title="Fields">
+    <ResponseField name="name" type="string" required>
+      Unique skill name (e.g., `code_assist`, `general_chat`).
+    </ResponseField>
+    
+    <ResponseField name="provider" type="Provider" required>
+      Which provider to use for this skill.
+    </ResponseField>
+    
+    <ResponseField name="system_prompt" type="Option<string>" optional>
+      Optional system prompt override for this skill.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Token Tracking
+
+### TokenTracker
+
+Tracks token usage across multiple API calls.
+
+```rust
+use jarvis_ai::TokenTracker;
+
+let tracker = TokenTracker::new();
+tracker.record("claude", 1000, 500);
+
+let total = tracker.total_tokens();
+let cost = tracker.total_cost();
+```
+
+## Error Handling
+
+<ResponseField name="AiError" type="enum">
+  Errors that can occur during AI operations.
+  
+  - `ApiError(String)` — API returned an error
+  - `RateLimited` — API rate limit hit
+  - `NetworkError(String)` — Network connection failed
+  - `ParseError(String)` — Failed to parse response
+  - `Timeout` — Request timed out
+</ResponseField>
+
+## Usage Example
+
+```rust
+use jarvis_ai::{
+    ClaudeClient, ClaudeConfig, Session,
+    Message, Role, ToolDefinition, AiError
+};
+
+#[tokio::main]
+async fn main() -> Result<(), AiError> {
+    // Create client
+    let config = ClaudeConfig {
+        api_key: std::env::var("ANTHROPIC_API_KEY").unwrap(),
+        model: "claude-3-5-sonnet-20241022".to_string(),
+        max_tokens: 4096,
+    };
+    let client = ClaudeClient::new(config);
+    
+    // Create session
+    let mut session = Session::new("claude")
+        .with_system_prompt("You are a helpful assistant.");
+    
+    // Send message
+    let messages = vec![
+        Message {
+            role: Role::User,
+            content: "What is Rust?".to_string(),
+        }
+    ];
+    
+    let response = client.send_message(&messages, &[]).await?;
+    println!("Assistant: {}", response.content);
+    println!("Tokens used: {}", response.usage.total_tokens());
+    
+    Ok(())
+}
+```
+
+## Related
+
+- [AI Configuration](/configuration/overview) — API keys and model settings
+- [Voice Configuration](/configuration/overview) — Whisper settings

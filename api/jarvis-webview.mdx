@@ -1,0 +1,404 @@
+---
+title: 'jarvis-webview'
+description: 'WebView bridge — embed web content with bidirectional IPC'
+---
+
+## Overview
+
+The `jarvis-webview` crate provides embedded web content for Jarvis panes. It wraps the `wry` crate (WebKit on macOS, WebView2 on Windows, WebKitGTK on Linux) and provides:
+
+- Managed WebView instances per pane
+- Bidirectional IPC (Rust ↔ JavaScript)
+- Custom `jarvis://` protocol for serving bundled content
+- Navigation control and security
+- Event handling (page load, title change, etc.)
+
+## Public API
+
+### WebViewManager
+
+Manages all WebView instances across tiling panes.
+
+```rust
+use jarvis_webview::WebViewManager;
+
+let manager = WebViewManager::new();
+```
+
+<ParamField path="new" type="fn() -> WebViewManager">
+  Create a new WebView manager.
+</ParamField>
+
+<ParamField path="drain_events" type="fn(&self) -> Vec<WebViewEvent>">
+  Drain all pending events from all WebViews.
+</ParamField>
+
+### WebViewConfig
+
+Configuration for creating a WebView.
+
+<ResponseField name="WebViewConfig" type="struct">
+  <Expandable title="Fields">
+    <ResponseField name="pane_id" type="u32" required>
+      ID of the pane this WebView belongs to.
+    </ResponseField>
+    
+    <ResponseField name="initial_url" type="Option<string>" optional>
+      Initial URL to navigate to.
+    </ResponseField>
+    
+    <ResponseField name="initial_html" type="Option<string>" optional>
+      Initial HTML to load (overrides `initial_url`).
+    </ResponseField>
+    
+    <ResponseField name="transparent" type="bool" default="false">
+      Whether the WebView background is transparent.
+    </ResponseField>
+    
+    <ResponseField name="devtools" type="bool" default="false">
+      Enable browser DevTools (right-click → Inspect).
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### WebViewHandle
+
+Handle to a specific WebView instance.
+
+```rust
+use jarvis_webview::WebViewHandle;
+
+// Navigate to a URL
+handle.load_url("https://docs.rs");
+
+// Load HTML
+handle.load_html("<h1>Hello!</h1>");
+
+// Go back/forward
+handle.go_back();
+handle.go_forward();
+
+// Evaluate JavaScript
+handle.eval("console.log('Hello from Rust!')");
+```
+
+### WebViewRegistry
+
+Global registry of all WebView instances.
+
+```rust
+use jarvis_webview::WebViewRegistry;
+
+let registry = WebViewRegistry::new();
+registry.register(pane_id, handle);
+
+if let Some(handle) = registry.get(pane_id) {
+    handle.load_url("https://example.com");
+}
+```
+
+## IPC System
+
+### IPC Messages (JS → Rust)
+
+JavaScript sends messages to Rust via `window.jarvis.ipc.postMessage()`.
+
+<ResponseField name="IpcMessage" type="struct">
+  <Expandable title="Fields">
+    <ResponseField name="kind" type="string" required>
+      Message type / command name.
+    </ResponseField>
+    
+    <ResponseField name="payload" type="IpcPayload" required>
+      Message payload.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="IpcPayload" type="enum">
+  - `Text(String)` — Simple text payload
+  - `Json(serde_json::Value)` — Structured JSON
+  - `None` — No payload
+</ResponseField>
+
+#### JavaScript API
+
+The `IPC_INIT_SCRIPT` injects this API into every WebView:
+
+```javascript
+// Send a message to Rust
+window.jarvis.ipc.send('command_name', { foo: 'bar' });
+
+// Register a handler for messages from Rust
+window.jarvis.ipc.on('rust_event', (payload) => {
+    console.log('Received from Rust:', payload);
+});
+
+// Request-response pattern (async)
+const result = await window.jarvis.ipc.request('get_data', {});
+console.log(result);
+```
+
+#### Built-in IPC Message Types
+
+These messages are automatically handled:
+
+<ResponseField name="Built-in IPC Messages" type="object">
+  <Expandable title="Message Types">
+    <ResponseField name="panel_focus" type="{}">
+      Sent when the WebView is clicked (to focus the pane).
+    </ResponseField>
+    
+    <ResponseField name="keybind" type="{ key, ctrl, alt, shift, meta }">
+      Forward keyboard shortcut to Rust.
+    </ResponseField>
+    
+    <ResponseField name="clipboard_copy" type="{ text }">
+      Copy text to clipboard.
+    </ResponseField>
+    
+    <ResponseField name="clipboard_paste" type="{}">
+      Request clipboard content (returns `{ kind, text, data_url }`).
+    </ResponseField>
+    
+    <ResponseField name="pty_input" type="{ data }">
+      Send input to the PTY (for terminal emulator).
+    </ResponseField>
+    
+    <ResponseField name="palette_click" type="{ index }">
+      Command palette item clicked.
+    </ResponseField>
+    
+    <ResponseField name="palette_hover" type="{ index }">
+      Command palette item hovered.
+    </ResponseField>
+    
+    <ResponseField name="palette_dismiss" type="{}">
+      Command palette dismissed.
+    </ResponseField>
+    
+    <ResponseField name="debug_event" type="{ type, ... }">
+      Debug event (mousedown, keydown, focus, blur).
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### IPC Events (Rust → JS)
+
+Rust sends messages to JavaScript via `js_dispatch_message()`.
+
+```rust
+use jarvis_webview::ipc::js_dispatch_message;
+use serde_json::json;
+
+let js = js_dispatch_message(
+    "config_updated",
+    &json!({ "theme": "tokyo-night" })
+);
+
+handle.eval(&js);
+```
+
+In JavaScript:
+
+```javascript
+window.jarvis.ipc.on('config_updated', (payload) => {
+    console.log('New theme:', payload.theme);
+});
+```
+
+#### Built-in IPC Events
+
+<ResponseField name="Built-in IPC Events" type="object">
+  <Expandable title="Event Types">
+    <ResponseField name="palette_show" type="{ items, query, selectedIndex, mode, placeholder }">
+      Show the command palette.
+    </ResponseField>
+    
+    <ResponseField name="palette_update" type="{ items, query, selectedIndex, mode, placeholder }">
+      Update command palette state.
+    </ResponseField>
+    
+    <ResponseField name="palette_hide" type="{}">
+      Hide the command palette.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## WebView Events
+
+<ResponseField name="WebViewEvent" type="enum">
+  Events emitted by WebView instances.
+  
+  <Expandable title="Variants">
+    <ResponseField name="PageLoad" type="{ pane_id, state, url }">
+      Page load state changed.
+      
+      `state` is `PageLoadState::Started` or `PageLoadState::Finished`.
+    </ResponseField>
+    
+    <ResponseField name="TitleChanged" type="{ pane_id, title }">
+      Document title changed.
+    </ResponseField>
+    
+    <ResponseField name="IpcMessage" type="{ pane_id, body }">
+      IPC message received from JavaScript.
+      
+      `body` is raw JSON string — parse with `IpcMessage::from_json()`.
+    </ResponseField>
+    
+    <ResponseField name="NavigationRequested" type="{ pane_id, url }">
+      A navigation was requested.
+    </ResponseField>
+    
+    <ResponseField name="Closed" type="{ pane_id }">
+      WebView was closed/destroyed.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="PageLoadState" type="enum">
+  - `Started` — Navigation has started
+  - `Finished` — Page has fully loaded (DOMContentLoaded + resources)
+</ResponseField>
+
+## Navigation Security
+
+### Allowed Navigation Prefixes
+
+```rust
+use jarvis_webview::ALLOWED_NAV_PREFIXES;
+
+for prefix in ALLOWED_NAV_PREFIXES {
+    println!("Allowed: {}", prefix);
+}
+```
+
+Allowed prefixes:
+- `https://`
+- `http://localhost`
+- `http://127.0.0.1`
+- `jarvis://`
+
+### is_navigation_allowed
+
+```rust
+use jarvis_webview::is_navigation_allowed;
+
+assert!(is_navigation_allowed("https://docs.rs"));
+assert!(is_navigation_allowed("http://localhost:3000"));
+assert!(!is_navigation_allowed("file:///etc/passwd"));
+```
+
+## Custom Protocol
+
+The `jarvis://` protocol serves bundled content.
+
+```javascript
+// Load bundled HTML
+window.location = 'jarvis://games/wordle.html';
+
+// Load bundled image
+const img = new Image();
+img.src = 'jarvis://assets/logo.png';
+```
+
+### ContentProvider
+
+Provides content for the custom protocol.
+
+```rust
+use jarvis_webview::ContentProvider;
+
+let provider = ContentProvider::new(assets_dir);
+```
+
+## Command Palette Integration
+
+The IPC system includes a full command palette implementation.
+
+### Show Palette from Rust
+
+```rust
+use jarvis_webview::ipc::js_dispatch_message;
+use serde_json::json;
+
+let js = js_dispatch_message("palette_show", &json!({
+    "items": [
+        { "label": "New Terminal", "keybind": "Cmd+T", "category": "Panels" },
+        { "label": "Close Panel", "keybind": "Esc Esc", "category": "Panels" }
+    ],
+    "query": "",
+    "selectedIndex": 0,
+    "mode": "command",
+    "placeholder": null
+}));
+
+handle.eval(&js);
+```
+
+### Handle Palette Events
+
+```rust
+match event {
+    WebViewEvent::IpcMessage { pane_id, body } => {
+        if let Some(msg) = IpcMessage::from_json(&body) {
+            match msg.kind.as_str() {
+                "palette_click" => {
+                    let index = msg.payload; // Extract index
+                    // Execute command
+                }
+                "palette_dismiss" => {
+                    // Hide palette
+                }
+                _ => {}
+            }
+        }
+    }
+    _ => {}
+}
+```
+
+## Usage Example
+
+```rust
+use jarvis_webview::{
+    WebViewManager, WebViewConfig, WebViewEvent, IpcMessage
+};
+
+#[tokio::main]
+async fn main() {
+    let manager = WebViewManager::new();
+    
+    let config = WebViewConfig {
+        pane_id: 1,
+        initial_url: Some("https://docs.rs".to_string()),
+        initial_html: None,
+        transparent: false,
+        devtools: true,
+    };
+    
+    let handle = manager.create(config, &window).unwrap();
+    
+    loop {
+        for event in manager.drain_events() {
+            match event {
+                WebViewEvent::PageLoad { pane_id, state, url } => {
+                    println!("Pane {} loaded: {}", pane_id, url);
+                }
+                WebViewEvent::IpcMessage { pane_id, body } => {
+                    if let Some(msg) = IpcMessage::from_json(&body) {
+                        println!("IPC: {} - {:?}", msg.kind, msg.payload);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+```
+
+## Related
+
+- [Games](/features/arcade-games) — Built-in WebView games
+- [`jarvis-tiling`](/api/jarvis-tiling) — Pane management

@@ -1,0 +1,220 @@
+---
+title: 'CLI Reference'
+description: 'Command-line interface reference for Jarvis'
+---
+
+## Synopsis
+
+```bash
+jarvis [OPTIONS]
+```
+
+## Description
+
+Jarvis is a GPU-accelerated terminal emulator with AI integration. It combines a modern terminal with an AI assistant, tiling window management, and social features.
+
+## Options
+
+<ParamField path="-e, --execute" type="string" optional>
+  Execute a command instead of the default shell.
+  
+  **Example:**
+  ```bash
+  jarvis --execute "npm run dev"
+  jarvis -e htop
+  ```
+  
+  The command is passed to the shell exactly as specified. Use quotes if the command contains spaces or special characters.
+</ParamField>
+
+<ParamField path="-d, --directory" type="string" optional>
+  Working directory to start in.
+  
+  **Example:**
+  ```bash
+  jarvis --directory ~/projects/my-app
+  jarvis -d /tmp
+  ```
+  
+  If not specified, Jarvis starts in the current working directory. Supports `~` expansion.
+</ParamField>
+
+<ParamField path="--config" type="string" optional>
+  Config file path override.
+  
+  **Example:**
+  ```bash
+  jarvis --config ~/.jarvis-custom.toml
+  jarvis --config /etc/jarvis.toml
+  ```
+  
+  By default, Jarvis loads configuration from:
+  - macOS: `~/Library/Application Support/jarvis/config.toml`
+  - Linux: `~/.config/jarvis/config.toml`
+  - Windows: `%APPDATA%\jarvis\config.toml`
+</ParamField>
+
+<ParamField path="--log-level" type="string" optional>
+  Log level override.
+  
+  **Valid values:**
+  - `debug` — Verbose debug information
+  - `info` — Informational messages (default)
+  - `warn` — Warnings only
+  - `error` — Errors only
+  
+  **Example:**
+  ```bash
+  jarvis --log-level debug
+  jarvis --log-level error
+  ```
+  
+  Overrides the `logging.level` setting in `config.toml`.
+</ParamField>
+
+<ParamField path="-h, --help" optional>
+  Print help information.
+  
+  **Example:**
+  ```bash
+  jarvis --help
+  ```
+</ParamField>
+
+<ParamField path="-V, --version" optional>
+  Print version information.
+  
+  **Example:**
+  ```bash
+  jarvis --version
+  ```
+</ParamField>
+
+## Examples
+
+### Basic Usage
+
+Start Jarvis with default settings:
+
+```bash
+jarvis
+```
+
+### Run a Specific Command
+
+Open Jarvis and immediately run a command:
+
+```bash
+# Monitor system resources
+jarvis --execute htop
+
+# Start a development server
+jarvis -e "npm run dev"
+
+# Run a Python script
+jarvis -e "python app.py"
+```
+
+### Start in a Specific Directory
+
+Open Jarvis in a project directory:
+
+```bash
+jarvis --directory ~/projects/my-app
+jarvis -d /var/log
+```
+
+### Combined Options
+
+Combine multiple options:
+
+```bash
+# Start in a directory and run a command
+jarvis -d ~/projects/my-app -e "npm test"
+
+# Use custom config with debug logging
+jarvis --config ~/.jarvis-dev.toml --log-level debug
+```
+
+### Custom Configuration
+
+Use a non-default config file:
+
+```bash
+# Development config
+jarvis --config ~/.jarvis-dev.toml
+
+# Production config
+jarvis --config /etc/jarvis/production.toml
+```
+
+### Debug Mode
+
+Run with verbose logging for troubleshooting:
+
+```bash
+jarvis --log-level debug
+```
+
+## Environment Variables
+
+Jarvis respects these environment variables:
+
+<ParamField path="SHELL" type="string">
+  Default shell to use if not specified in config.
+  
+  **Example:**
+  ```bash
+  export SHELL=/bin/zsh
+  jarvis
+  ```
+</ParamField>
+
+<ParamField path="TERM" type="string">
+  Terminal type. Jarvis sets this to `xterm-256color` by default.
+</ParamField>
+
+<ParamField path="ANTHROPIC_API_KEY" type="string">
+  Claude API key (if not in config).
+  
+  **Example:**
+  ```bash
+  export ANTHROPIC_API_KEY=sk-ant-...
+  jarvis
+  ```
+</ParamField>
+
+<ParamField path="GOOGLE_API_KEY" type="string">
+  Gemini API key (if not in config).
+</ParamField>
+
+<ParamField path="OPENAI_API_KEY" type="string">
+  OpenAI API key for Whisper (if not in config).
+</ParamField>
+
+## Exit Codes
+
+<ResponseField name="0" type="Success">
+  Jarvis exited normally.
+</ResponseField>
+
+<ResponseField name="1" type="Error">
+  General error (config load failed, initialization error, etc.).
+</ResponseField>
+
+<ResponseField name="2" type="Usage Error">
+  Invalid command-line arguments.
+</ResponseField>
+
+## Configuration File
+
+For detailed configuration options, see:
+
+- [Configuration Overview](/configuration/overview)
+- [Configuration Guide](/configuration/overview)
+
+## See Also
+
+- [`jarvis-app`](/api/jarvis-app) — Application API reference
+- [`jarvis-config`](/api/jarvis-config) — Configuration system
+- [Getting Started](/quickstart) — Installation and setup

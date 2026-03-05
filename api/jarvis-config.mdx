@@ -1,0 +1,329 @@
+---
+title: 'jarvis-config'
+description: 'Configuration system — TOML loading, validation, themes, and live reload'
+---
+
+## Overview
+
+The `jarvis-config` crate provides Jarvis's configuration system:
+
+- TOML-based configuration with sensible defaults
+- Theme system with built-in themes
+- Live reload via file watcher
+- Full validation
+- Plugin discovery
+
+## Quick Start
+
+```rust
+use jarvis_config::{load_config, config_to_json};
+
+let config = load_config().expect("failed to load config");
+let json = config_to_json(&config);
+println!("{}", json);
+```
+
+## Core Functions
+
+### load_config
+
+Loads configuration from the platform default path.
+
+```rust
+use jarvis_config::load_config;
+use jarvis_common::ConfigError;
+
+fn main() -> Result<(), ConfigError> {
+    let config = load_config()?;
+    println!("Theme: {}", config.theme.name);
+    Ok(())
+}
+```
+
+This function:
+1. Loads `config.toml` from the OS config directory
+2. Creates a default config if none exists
+3. Applies the selected theme
+4. Discovers local plugins
+5. Validates the result
+
+### config_to_json
+
+Serializes a config to pretty-printed JSON.
+
+```rust
+use jarvis_config::{load_config, config_to_json};
+
+let config = load_config()?;
+let json = config_to_json(&config);
+```
+
+## Configuration Schema
+
+### JarvisConfig
+
+Root configuration struct.
+
+<ResponseField name="JarvisConfig" type="struct">
+  All fields use `serde(default)` so partial configs work correctly.
+  
+  <Expandable title="Fields">
+    <ResponseField name="theme" type="ThemeConfig" required>
+      Theme selection and overrides.
+    </ResponseField>
+    
+    <ResponseField name="colors" type="ColorConfig" required>
+      Color palette.
+    </ResponseField>
+    
+    <ResponseField name="font" type="FontConfig" required>
+      Font family, size, and rendering.
+    </ResponseField>
+    
+    <ResponseField name="terminal" type="TerminalConfig" required>
+      Terminal emulator settings.
+    </ResponseField>
+    
+    <ResponseField name="shell" type="ShellConfig" required>
+      Shell program and environment.
+    </ResponseField>
+    
+    <ResponseField name="window" type="WindowConfig" required>
+      Window decorations and behavior.
+    </ResponseField>
+    
+    <ResponseField name="effects" type="EffectsSchemaConfig" required>
+      Visual effects (bloom, scanlines, etc.).
+    </ResponseField>
+    
+    <ResponseField name="layout" type="LayoutConfig" required>
+      Panel layout and spacing.
+    </ResponseField>
+    
+    <ResponseField name="opacity" type="OpacityConfig" required>
+      Opacity for various UI elements.
+    </ResponseField>
+    
+    <ResponseField name="background" type="BackgroundConfig" required>
+      Background mode (hex grid, solid, image).
+    </ResponseField>
+    
+    <ResponseField name="visualizer" type="VisualizerConfig" required>
+      Audio visualizer settings.
+    </ResponseField>
+    
+    <ResponseField name="startup" type="StartupConfig" required>
+      Boot animation and startup behavior.
+    </ResponseField>
+    
+    <ResponseField name="voice" type="VoiceConfig" required>
+      Voice input settings.
+    </ResponseField>
+    
+    <ResponseField name="keybinds" type="KeybindConfig" required>
+      Keyboard shortcuts.
+    </ResponseField>
+    
+    <ResponseField name="panels" type="PanelsConfig" required>
+      Panel-specific settings.
+    </ResponseField>
+    
+    <ResponseField name="games" type="GamesConfig" required>
+      Game launcher settings.
+    </ResponseField>
+    
+    <ResponseField name="livechat" type="LivechatConfig" required>
+      Livechat server settings.
+    </ResponseField>
+    
+    <ResponseField name="presence" type="PresenceConfig" required>
+      Presence/social settings.
+    </ResponseField>
+    
+    <ResponseField name="performance" type="PerformanceConfig" required>
+      GPU and rendering performance.
+    </ResponseField>
+    
+    <ResponseField name="updates" type="UpdatesConfig" required>
+      Auto-update settings.
+    </ResponseField>
+    
+    <ResponseField name="logging" type="LoggingConfig" required>
+      Logging level and file output.
+    </ResponseField>
+    
+    <ResponseField name="advanced" type="AdvancedConfig" required>
+      Experimental and developer settings.
+    </ResponseField>
+    
+    <ResponseField name="auto_open" type="AutoOpenConfig" required>
+      Auto-open panels on startup.
+    </ResponseField>
+    
+    <ResponseField name="status_bar" type="StatusBarConfig" required>
+      Status bar appearance.
+    </ResponseField>
+    
+    <ResponseField name="relay" type="RelayConfig" required>
+      Relay server settings.
+    </ResponseField>
+    
+    <ResponseField name="plugins" type="PluginsConfig" required>
+      Plugin configuration.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Constants
+
+<ParamField path="CONFIG_SCHEMA_VERSION" type="u32">
+  Current config schema version. Always `1`.
+</ParamField>
+
+## Theme System
+
+### Built-in Themes
+
+```rust
+use jarvis_config::BUILT_IN_THEMES;
+
+for theme_name in BUILT_IN_THEMES {
+    println!("Theme: {}", theme_name);
+}
+```
+
+Built-in themes:
+- `jarvis-dark` (default)
+- `catppuccin-mocha`
+- `catppuccin-macchiato`
+- `catppuccin-frappe`
+- `catppuccin-latte`
+- `tokyo-night`
+- `dracula`
+- `nord`
+- `solarized-dark`
+- `solarized-light`
+
+### Theme Overrides
+
+```rust
+use jarvis_config::ThemeOverrides;
+
+let overrides = ThemeOverrides {
+    primary: Some("#ff0000".to_string()),
+    background: Some("#000000".to_string()),
+    ..Default::default()
+};
+```
+
+## Live Reload
+
+### ConfigWatcher
+
+Watches the config file for changes and reloads automatically.
+
+```rust
+use jarvis_config::ConfigWatcher;
+
+let watcher = ConfigWatcher::new()?;
+
+loop {
+    if let Some(new_config) = watcher.check_for_changes() {
+        println!("Config reloaded!");
+        // Apply new config
+    }
+}
+```
+
+### ReloadManager
+
+Manages config reloading with debouncing.
+
+```rust
+use jarvis_config::ReloadManager;
+
+let mut manager = ReloadManager::new();
+manager.watch(config_path)?;
+```
+
+## Saving Configuration
+
+### save_config
+
+Saves config to the default platform path.
+
+```rust
+use jarvis_config::{JarvisConfig, save_config};
+
+let config = JarvisConfig::default();
+save_config(&config)?;
+```
+
+### save_config_to_path
+
+Saves config to a specific path.
+
+```rust
+use jarvis_config::{JarvisConfig, save_config_to_path};
+use std::path::Path;
+
+let config = JarvisConfig::default();
+let path = Path::new("/tmp/jarvis.toml");
+save_config_to_path(&config, path)?;
+```
+
+## Validation
+
+All configs are validated on load.
+
+```rust
+use jarvis_config::validation;
+
+validation::validate(&config)?;
+```
+
+Validation checks:
+- Required fields are present
+- Values are in valid ranges
+- Color strings are valid hex codes
+- Keybind syntax is correct
+
+## Default Configuration
+
+```rust
+use jarvis_config::JarvisConfig;
+
+let config = JarvisConfig::default();
+assert_eq!(config.theme.name, "jarvis-dark");
+assert_eq!(config.font.family, "Menlo");
+assert_eq!(config.font.size, 13);
+```
+
+See the full default configuration in the [Configuration Guide](/configuration/overview).
+
+## Usage Example
+
+```rust
+use jarvis_config::{load_config, save_config, ConfigError};
+
+fn main() -> Result<(), ConfigError> {
+    // Load config
+    let mut config = load_config()?;
+    
+    // Modify settings
+    config.theme.name = "tokyo-night".to_string();
+    config.font.size = 14;
+    config.colors.primary = "#7aa2f7".to_string();
+    
+    // Save changes
+    save_config(&config)?;
+    
+    println!("Config saved!");
+    Ok(())
+}
+```
+
+## Related
+
+- [Configuration Guide](/configuration/overview) — Full config reference
+- [Themes](/configuration/themes) — Theme customization

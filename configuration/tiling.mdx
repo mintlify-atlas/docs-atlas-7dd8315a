@@ -1,0 +1,539 @@
+---
+title: Tiling & Window Management
+description: Configure panel layout, tiling behavior, and window management in Jarvis
+---
+
+## Overview
+
+Jarvis uses a **binary split tree** to manage pane layout within the application window. Every visible pane occupies a leaf node in the tree, and interior nodes describe how their two children are divided—either horizontally (side by side) or vertically (top and bottom).
+
+<Info>
+The tiling system lives in the `jarvis-tiling` crate and is intentionally decoupled from rendering and platform windowing.
+</Info>
+
+## Layout Configuration
+
+Layout settings control the visual appearance of the tiling grid:
+
+### Core Layout Settings
+
+<ParamField path="layout.panel_gap" type="u32" default={6}>
+  Gap between panels in pixels (valid range: **1–20**)
+</ParamField>
+
+<ParamField path="layout.border_radius" type="u32" default={8}>
+  Border radius in pixels (valid range: **0–20**)
+</ParamField>
+
+<ParamField path="layout.padding" type="u32" default={10}>
+  Inner pane padding in pixels (valid range: **0–40**)
+</ParamField>
+
+<ParamField path="layout.max_panels" type="u32" default={5}>
+  Maximum number of panels (valid range: **1–10**)
+</ParamField>
+
+<ParamField path="layout.default_panel_width" type="f64" default={0.72}>
+  Default panel width as fraction of screen (valid range: **0.3–1.0**)
+</ParamField>
+
+<ParamField path="layout.scrollbar_width" type="u32" default={3}>
+  Scrollbar width in pixels (valid range: **1–10**)
+</ParamField>
+
+<ParamField path="layout.border_width" type="f64" default={0.0}>
+  Panel border width in pixels (valid range: **0.0–3.0**)
+</ParamField>
+
+<ParamField path="layout.outer_padding" type="u32" default={0}>
+  Screen-edge padding in pixels (valid range: **0–40**)
+</ParamField>
+
+<ParamField path="layout.inactive_opacity" type="f64" default={1.0}>
+  Opacity for unfocused panels (valid range: **0.0–1.0**)
+</ParamField>
+
+### Configuration Example
+
+```toml config.toml
+[layout]
+panel_gap = 8
+border_radius = 12
+padding = 12
+max_panels = 3
+default_panel_width = 0.5
+border_width = 1.0
+outer_padding = 10
+inactive_opacity = 0.7
+```
+
+## The Split Tree
+
+The layout is represented by a tree structure:
+
+```
+Window (800 x 600)
++-------------------------------------------+
+|    Tree root: Split(H, 0.5)              |
+|     /                   \                |
+|  Leaf(1)         Split(V, 0.5)           |
+|                   /          \           |
+|               Leaf(2)     Leaf(3)        |
++-------------------------------------------+
+
+Visual result:
++------------------+------------------+
+|                  |                  |
+|                  |    Pane 2        |
+|    Pane 1        |                  |
+|                  +------------------+
+|                  |                  |
+|                  |    Pane 3        |
++------------------+------------------+
+```
+
+<Accordion title="Split Tree Data Model">
+```rust
+pub enum SplitNode {
+    Leaf { pane_id: u32 },
+    Split {
+        direction: Direction,   // Horizontal or Vertical
+        ratio: f64,             // 0.0 .. 1.0, how much space the first child gets
+        first: Box<SplitNode>,
+        second: Box<SplitNode>,
+    },
+}
+
+pub enum Direction {
+    Horizontal,  // Children placed side by side (left | right)
+    Vertical,    // Children placed top over bottom (top / bottom)
+}
+```
+</Accordion>
+
+## Splitting Panes
+
+### Manual Split
+
+You can split panes horizontally (side by side) or vertically (top/bottom):
+
+- **Horizontal split** (`SplitHorizontal`): places panes side by side
+- **Vertical split** (`SplitVertical`): places panes top and bottom
+
+<CodeGroup>
+
+```toml Default Keybinds
+[keybinds]
+split_vertical = "Cmd+D"
+split_horizontal = "Cmd+Shift+D"
+```
+
+```toml Custom Keybinds
+[keybinds]
+split_vertical = "Cmd+S"
+split_horizontal = "Cmd+Shift+S"
+```
+
+</CodeGroup>
+
+### Auto-Split Logic
+
+The `auto_split_direction()` method chooses the split direction based on the focused pane's aspect ratio:
+
+- If `width >= height` → **Horizontal** (split side by side)
+- If `width < height` → **Vertical** (split top/bottom)
+
+<Note>
+The `max_panels` configuration value caps the total number of panes that can exist simultaneously.
+</Note>
+
+### Split Behavior
+
+When a split is performed:
+
+<Steps>
+  <Step title="Replace leaf">
+    The currently focused leaf is replaced by a `Split` node
+  </Step>
+  
+  <Step title="Create children">
+    The original pane becomes the `first` child, a new pane becomes the `second` child
+  </Step>
+  
+  <Step title="Set ratio">
+    The `ratio` is set to `0.5` (equal split)
+  </Step>
+  
+  <Step title="Update focus">
+    Focus moves to the new pane
+  </Step>
+  
+  <Step title="Cancel zoom">
+    If the manager was in zoom mode, zoom is cancelled
+  </Step>
+</Steps>
+
+## Focus Management
+
+### Focus Operations
+
+<CardGroup cols={2}>
+  <Card title="focus_next()" icon="arrow-right">
+    Move focus to the next pane in depth-first order, wrapping around
+  </Card>
+  
+  <Card title="focus_prev()" icon="arrow-left">
+    Move focus to the previous pane, wrapping from first to last
+  </Card>
+  
+  <Card title="focus_direction(dir)" icon="arrow-up">
+    Move focus to the neighbor in a specific direction (doesn't wrap)
+  </Card>
+  
+  <Card title="focus_pane(id)" icon="crosshairs">
+    Focus a specific pane by its numeric ID
+  </Card>
+</CardGroup>
+
+### Focus Indicators
+
+When `layout.inactive_opacity < 1.0`, unfocused panes are rendered with reduced opacity. The `layout.border_width` setting controls whether pane borders are visible (default `0.0` means no border).
+
+```toml config.toml
+[layout]
+inactive_opacity = 0.7
+border_width = 1.0
+
+[effects]
+inactive_pane_dim = true
+dim_opacity = 0.6
+```
+
+## Zoom Mode
+
+Zoom mode makes a single pane fill the entire content area, hiding all other panes.
+
+### Behavior
+
+- **Toggle on:** `zoom_toggle()` sets `zoomed = Some(focused_id)`
+- **Toggle off:** calling `zoom_toggle()` again sets `zoomed = None`
+- Zooming requires at least 2 panes
+- Any split operation automatically cancels zoom
+- Closing a pane cancels zoom
+
+<Note>
+When zoomed, only the zoomed pane is positioned; all other panes remain at their previous positions (off-screen).
+</Note>
+
+## Resizing Panes
+
+Pane sizes are controlled by the `ratio` field on `Split` nodes.
+
+### Keyboard Resize
+
+Use keyboard shortcuts to resize the focused pane:
+
+```toml config.toml
+# Resize actions (not in keybinds section)
+# These are triggered via ResizePane action with direction
+```
+
+Each resize step adjusts the ratio by **5%**. The ratio is clamped to `[0.1, 0.9]`, preventing any pane from being resized to invisibility.
+
+### Mouse Drag Resize
+
+Mouse drag resize is a three-phase interaction:
+
+<Steps>
+  <Step title="Hit testing (cursor move)">
+    On cursor movement, the system:
+    - Computes all split borders from the current tree
+    - Hit-tests the cursor position (6-pixel hit zone)
+    - Changes cursor icon to `ColResize` or `RowResize` when hovering a border
+  </Step>
+  
+  <Step title="Drag start (mouse button press)">
+    When pressing the mouse button over a border, the system records:
+    - The border being dragged
+    - The start position
+  </Step>
+  
+  <Step title="Drag update (cursor move while dragging)">
+    While dragging, each cursor movement:
+    - Computes the pixel delta from the drag start
+    - Converts pixels to a ratio delta
+    - Calls `adjust_ratio_between()` to update the split node
+    - Repositions webviews
+  </Step>
+  
+  <Step title="Drag end (mouse button release)">
+    Clears the drag state and resets the cursor
+  </Step>
+</Steps>
+
+## Pane Stacks (Tabs)
+
+A single leaf position in the tree can host **multiple panes as a stack** (tabbed interface).
+
+### Stack Operations
+
+<ParamField path="push_to_stack(kind, title)">
+  Add a new pane of the given kind to the stack at the focused leaf position
+</ParamField>
+
+<ParamField path="cycle_stack_next()">
+  Advance to the next tab, wrapping around
+</ParamField>
+
+<ParamField path="cycle_stack_prev()">
+  Go to the previous tab, wrapping around
+</ParamField>
+
+<Note>
+Only the active pane in the stack is visible; others are preserved in memory.
+</Note>
+
+## Opacity Configuration
+
+Transparency settings for different UI layers:
+
+<ParamField path="opacity.background" type="f64" default={1.0}>
+  Background layer opacity (valid range: **0.0–1.0**)
+</ParamField>
+
+<ParamField path="opacity.panel" type="f64" default={0.85}>
+  Panel opacity (valid range: **0.0–1.0**)
+</ParamField>
+
+<ParamField path="opacity.orb" type="f64" default={1.0}>
+  Orb visualizer opacity (valid range: **0.0–1.0**)
+</ParamField>
+
+<ParamField path="opacity.hex_grid" type="f64" default={0.8}>
+  Hex grid background opacity (valid range: **0.0–1.0**)
+</ParamField>
+
+<ParamField path="opacity.hud" type="f64" default={1.0}>
+  HUD overlay opacity (valid range: **0.0–1.0**)
+</ParamField>
+
+### Opacity Example
+
+```toml config.toml
+[opacity]
+background = 0.95
+panel = 0.9
+hex_grid = 0.5
+```
+
+## UI Chrome: Tab Bar and Status Bar
+
+UI chrome elements surround the content area and affect the viewport available for tiling.
+
+### Tab Bar
+
+The tab bar sits at the top of the window with a default height of **32 pixels**.
+
+### Status Bar
+
+The status bar sits at the bottom of the window with a default height of **24 pixels**.
+
+<ParamField path="status_bar.enabled" type="bool" default={true}>
+  Show the status bar
+</ParamField>
+
+<ParamField path="status_bar.height" type="u32" default={28}>
+  Status bar height in pixels (valid range: **20–48**)
+</ParamField>
+
+<ParamField path="status_bar.show_panel_buttons" type="bool" default={true}>
+  Show panel toggle buttons (left side)
+</ParamField>
+
+<ParamField path="status_bar.show_online_count" type="bool" default={true}>
+  Show online user count (right side)
+</ParamField>
+
+<ParamField path="status_bar.bg" type="string" default="rgba(24,24,37,0.95)">
+  Background color (CSS color string)
+</ParamField>
+
+### Chrome Layout
+
+```
++========================================+
+|  Tab Bar (32px)   [Tab1] [Tab2] [Tab3] |
++========================================+
+|                                        |
+|        Content Area (tiling)           |
+|                                        |
+|    +------------------+-----------+    |
+|    |                  |           |    |
+|    |    Pane 1        |  Pane 2   |    |
+|    +------------------+-----------+    |
++========================================+
+|  Status Bar (24px)  [left] [ctr] [rgt] |
++========================================+
+```
+
+## Auto-Open Panels
+
+Configure panels to open automatically when Jarvis starts:
+
+```toml config.toml
+[[auto_open.panels]]
+kind = "terminal"
+command = "claude"
+title = "Claude Code"
+
+[[auto_open.panels]]
+kind = "terminal"
+title = "Terminal"
+
+[[auto_open.panels]]
+kind = "chat"
+title = "Chat"
+```
+
+### Panel Kinds
+
+<CardGroup cols={2}>
+  <Card title="Terminal" icon="terminal">
+    Interactive terminal emulator (xterm.js)
+  </Card>
+  
+  <Card title="Chat" icon="comments">
+    Chat interface pane
+  </Card>
+  
+  <Card title="Assistant" icon="robot">
+    AI assistant panel
+  </Card>
+  
+  <Card title="WebView" icon="browser">
+    General-purpose web content pane
+  </Card>
+</CardGroup>
+
+### Auto-Open Configuration
+
+<ParamField path="kind" type="enum" default="terminal">
+  Panel type: `terminal`, `assistant`, `chat`, `settings`, `presence`
+</ParamField>
+
+<ParamField path="command" type="string" optional>
+  Command to run (empty = `$SHELL`)
+</ParamField>
+
+<ParamField path="args" type="string[]" default="[]">
+  Arguments for the command
+</ParamField>
+
+<ParamField path="title" type="string" optional>
+  Panel title
+</ParamField>
+
+<ParamField path="working_directory" type="string" optional>
+  Working directory (empty = `$HOME`)
+</ParamField>
+
+<Note>
+To disable auto-open entirely, set an empty array:
+```toml
+[auto_open]
+panels = []
+```
+</Note>
+
+## Multi-Panel Workspace Example
+
+```toml config.toml
+[layout]
+max_panels = 5
+panel_gap = 4
+default_panel_width = 0.5
+border_width = 1.0
+outer_padding = 8
+inactive_opacity = 0.7
+
+[effects]
+inactive_pane_dim = true
+dim_opacity = 0.5
+
+[[auto_open.panels]]
+kind = "terminal"
+title = "Build"
+working_directory = "/projects/my-app"
+
+[[auto_open.panels]]
+kind = "terminal"
+title = "Server"
+command = "npm"
+args = ["run", "dev"]
+
+[[auto_open.panels]]
+kind = "assistant"
+title = "AI"
+
+[[auto_open.panels]]
+kind = "chat"
+title = "Chat"
+```
+
+## Advanced: Layout Engine
+
+The layout engine converts the split tree into concrete pixel rectangles:
+
+<Accordion title="Algorithm">
+  1. **Apply outer padding** — The viewport is inset by `outer_padding` on all four sides
+  
+  2. **Recurse through the tree** — At each `Split` node:
+     - Subtract the `gap` from the available dimension
+     - Multiply the remaining space by `ratio` to get the first child's size
+     - The second child gets the remainder
+     - The gap is placed between the two children
+  
+  3. **Leaf nodes** emit `(pane_id, bounds)` directly
+</Accordion>
+
+### Gap and Padding Calculation
+
+```
+Viewport: 800 x 600, outer_padding = 10, gap = 8
+
++---------- 800 ----------+
+|  padding = 10            |
+|  +--- 780 x 580 ------+ |
+|  |        |  gap  |    | |
+|  | Pane 1 | (8px) | P2 | |
+|  |  386   |       |386 | |
+|  +--------+-------+----+ |
++--------------------------+
+
+Available = 780 - 8 = 772
+Each pane = 772 * 0.5 = 386
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Panels not splitting">
+    Check:
+    - Current panel count < `layout.max_panels`
+    - Keybinds are correctly configured
+    - Not in zoom mode (splits cancel zoom)
+  </Accordion>
+  
+  <Accordion title="Gaps too large/small">
+    Adjust `layout.panel_gap` (valid range: 1–20 pixels)
+  </Accordion>
+  
+  <Accordion title="Can't see inactive panes">
+    Increase `layout.inactive_opacity` or disable `effects.inactive_pane_dim`
+  </Accordion>
+  
+  <Accordion title="Resize not working">
+    - Check that you're dragging on the split border (6-pixel hit zone)
+    - Ratios are clamped to [0.1, 0.9] to prevent invisible panes
+  </Accordion>
+</AccordionGroup>

@@ -1,0 +1,153 @@
+---
+title: 'jarvis-tiling'
+description: 'Tiling window manager — pane layout, splitting, and navigation'
+---
+
+## Overview
+
+The `jarvis-tiling` crate provides tiling window management for Jarvis. It handles creating, organizing, and navigating between panes (terminals, webviews, assistant panels, etc.).
+
+## Public API
+
+### TilingManager
+
+The main manager for all panes and layout operations.
+
+```rust
+use jarvis_tiling::TilingManager;
+
+let mut manager = TilingManager::new();
+```
+
+### Pane
+
+Represents a single pane in the layout.
+
+#### Pane Types
+
+<ResponseField name="Pane" type="struct">
+  A pane is a rectangular region that can contain different types of content.
+  
+  <Expandable title="Fields">
+    <ResponseField name="id" type="PaneId" required>
+      Unique identifier for this pane.
+    </ResponseField>
+    
+    <ResponseField name="kind" type="PaneKind" required>
+      The type of content in this pane.
+      
+      Valid values:
+      - `Terminal` — PTY-backed terminal emulator
+      - `WebView` — Embedded web content
+      - `Assistant` — AI assistant chat interface
+      - `Chat` — Social/livechat panel
+      - `ExternalApp` — External application embedded via platform API
+    </ResponseField>
+    
+    <ResponseField name="title" type="string" required>
+      Display title shown in tabs and status bar.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+#### Constructor Methods
+
+```rust
+use jarvis_tiling::Pane;
+use jarvis_common::types::PaneId;
+
+let pane_id = PaneId::new();
+
+// Create different types of panes
+let terminal = Pane::new_terminal(pane_id, "bash");
+let webview = Pane::new_webview(pane_id, "Documentation");
+let assistant = Pane::new_assistant(pane_id, "AI Assistant");
+let chat = Pane::new_chat(pane_id, "Livechat");
+let external = Pane::new_external(pane_id, "VS Code");
+```
+
+<ParamField path="new_terminal" type="fn(PaneId, impl Into<String>) -> Pane">
+  Create a new terminal pane.
+</ParamField>
+
+<ParamField path="new_webview" type="fn(PaneId, impl Into<String>) -> Pane">
+  Create a new webview pane for embedded web content.
+</ParamField>
+
+<ParamField path="new_assistant" type="fn(PaneId, impl Into<String>) -> Pane">
+  Create a new AI assistant pane.
+</ParamField>
+
+<ParamField path="new_chat" type="fn(PaneId, impl Into<String>) -> Pane">
+  Create a new social/livechat pane.
+</ParamField>
+
+<ParamField path="new_external" type="fn(PaneId, impl Into<String>) -> Pane">
+  Create a pane for an external application.
+</ParamField>
+
+### PaneStack
+
+Manages a stack of panes with focus tracking.
+
+```rust
+use jarvis_tiling::PaneStack;
+
+let mut stack = PaneStack::new();
+```
+
+### LayoutEngine
+
+Computes positions and sizes for all panes based on the current layout mode.
+
+```rust
+use jarvis_tiling::LayoutEngine;
+
+let engine = LayoutEngine::new();
+```
+
+### WindowManager
+
+Platform-specific window management (macOS, Linux, Windows).
+
+```rust
+use jarvis_tiling::WindowManager;
+
+// Platform-specific implementation
+let window_manager = WindowManager::new();
+```
+
+## Layout Modes
+
+Jarvis supports multiple tiling layouts:
+
+- **Stack** — Single full-screen pane with tabs
+- **Vertical Split** — Side-by-side panes
+- **Horizontal Split** — Top-and-bottom panes
+- **Grid** — 2x2 or 3x3 grid layout
+
+## Usage Example
+
+```rust
+use jarvis_tiling::{TilingManager, Pane};
+use jarvis_common::types::PaneId;
+
+fn main() {
+    let mut manager = TilingManager::new();
+    
+    // Create a new terminal pane
+    let pane_id = PaneId::new();
+    let pane = Pane::new_terminal(pane_id, "zsh");
+    
+    // Add it to the manager
+    manager.add_pane(pane);
+    
+    // Focus the pane
+    manager.focus(pane_id);
+}
+```
+
+## Related
+
+- [Layout Configuration](/configuration/tiling) — Configure panel gaps, borders, and defaults
+- [`jarvis-app`](/api/jarvis-app) — Main application orchestrator
